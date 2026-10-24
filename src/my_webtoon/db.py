@@ -11,7 +11,7 @@ import json
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -45,6 +45,7 @@ def session(path: Path) -> Iterator[sqlite3.Connection]:
 def init_schema(conn: sqlite3.Connection) -> None:
     sql = resources.files("my_webtoon").joinpath("schema.sql").read_text(encoding="utf-8")
     conn.executescript(sql)
+    migrate_ratings_v1(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +167,48 @@ def search_comics(conn: sqlite3.Connection, query: str, limit: int = 40) -> list
     return [Comic.from_row(r) for r in rows]
 
 
+COMIC_SORTS = {
+    "popular": ("인기순", "c.popularity DESC NULLS LAST"),
+    "free": ("무료 많은 순", "c.is_all_free DESC, c.free_episodes DESC NULLS LAST"),
+    "episodes": ("회차 많은 순", "c.total_episodes DESC NULLS LAST"),
+    "rating": ("네이버 평점순", "c.naver_rating DESC NULLS LAST, c.popularity DESC NULLS LAST"),
+    "recent": ("최근 수집순", "c.crawled_at DESC"),
+}
+
+
+def list_comics(
+    conn: sqlite3.Connection,
+    *,
+    query: str = "",
+    genre: str = "",
+    sort: str = "popular",
+    limit: int = 40,
+    offset: int = 0,
+) -> tuple[list[Comic], int]:
+    """수집 목록 화면용. (현재 페이지 작품들, 조건에 맞는 전체 개수)."""
+    where, params = [], []
+    if query.strip():
+        where.append("(c.title LIKE ? OR c.authors LIKE ?)")
+        params += [f"%{query.strip()}%"] * 2
+    if genre:
+        where.append("c.genre = ?")
+        params.append(genre)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    order = COMIC_SORTS.get(sort, COMIC_SORTS["popular"])[1]
+    total = conn.execute(f"SELECT COUNT(*) FROM comics c{clause}", params).fetchone()[0]
+    rows = conn.execute(
+        _COMIC_SELECT + clause + f" ORDER BY {order} LIMIT ? OFFSET ?", [*params, limit, offset]
+    ).fetchall()
+    return [Comic.from_row(r) for r in rows], total
+
+
+def genres(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT genre FROM comics WHERE genre IS NOT NULL GROUP BY genre ORDER BY COUNT(*) DESC"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
 def comics_signature(conn: sqlite3.Connection) -> tuple:
     """작품 데이터가 바뀌었는지 싸게 확인하는 값. 추천 모델 캐시 무효화에 쓴다."""
     row = conn.execute("SELECT COUNT(*), MAX(crawled_at) FROM comics").fetchone()
@@ -280,61 +323,155 @@ def recent_runs(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
 
 
 # ---------------------------------------------------------------------------
-# ratings
+# reviews (내 평가)
 # ---------------------------------------------------------------------------
+
+# 상태는 하나만 고른다 (봤음이면서 하차일 수는 없으니까). 점수·세부 점수·메모는 상태와 별개로 자유롭게.
+STATUSES = {
+    "seen": "봤음",
+    "watching": "보는 중",
+    "dropped": "하차",
+    "wish": "보고 싶음",
+    "dismissed": "관심 없음",
+}
+# 세부 평가 항목. 여기에 한 줄 추가하면 화면·저장·내보내기에 바로 반영된다 (DB 는 JSON 이라 마이그레이션 불필요).
+ASPECTS = {
+    "story": "스토리",
+    "art": "작화",
+    "character": "캐릭터",
+    "pacing": "전개",
+    "immersion": "몰입도",
+}
+SCORE_RANGE = range(0, 11)  # 0~10
 
 
 @dataclass
-class Rating:
+class Review:
     product_no: int
-    kind: str  # rated / seen / dismissed
-    score: int | None
-    memo: str
-    updated_at: str
+    status: str | None = None
+    score: int | None = None
+    aspects: dict[str, int] = field(default_factory=dict)
+    episodes_read: int | None = None
+    memo: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    @property
+    def overall(self) -> float | None:
+        """종합 점수. 직접 준 점수가 없으면 세부 점수 평균으로 대신한다. 둘 다 없으면 None."""
+        if self.score is not None:
+            return float(self.score)
+        if self.aspects:
+            return sum(self.aspects.values()) / len(self.aspects)
+        return None
+
+    @property
+    def status_label(self) -> str | None:
+        return STATUSES.get(self.status) if self.status else None
+
+    def is_empty(self) -> bool:
+        return (
+            self.status is None
+            and self.score is None
+            and not self.aspects
+            and self.episodes_read is None
+            and not self.memo
+        )
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Review:
+        return cls(
+            product_no=row["product_no"],
+            status=row["status"],
+            score=row["score"],
+            aspects=json.loads(row["aspects"] or "{}"),
+            episodes_read=row["episodes_read"],
+            memo=row["memo"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
 
-def set_rating(
-    conn: sqlite3.Connection,
-    product_no: int,
-    kind: str,
-    score: int | None = None,
-    memo: str | None = None,
-) -> None:
-    if kind == "rated" and not (score and 1 <= score <= 5):
-        raise ValueError("rated 는 1~5 점수가 필요하다")
-    if kind != "rated":
-        score = None
+def _validate_score(name: str, value: int | None) -> int | None:
+    if value is None:
+        return None
+    value = int(value)
+    if value not in SCORE_RANGE:
+        raise ValueError(f"{name} 는 0~10 이어야 한다 (받은 값: {value})")
+    return value
+
+
+def update_review(conn: sqlite3.Connection, product_no: int, **changes) -> Review | None:
+    """주어진 칸만 바꾼다 (부분 업데이트). 값이 None 이면 그 칸을 비운다.
+
+    update_review(conn, 1, score=8)              → 점수만 8, 상태·메모는 그대로
+    update_review(conn, 1, status="seen")        → 상태만 '봤음', 점수는 그대로
+    update_review(conn, 1, aspects={"art": 9})   → 세부 점수 통째로 교체
+    모든 칸이 비면 행을 지우고 None 을 돌려준다.
+    """
+    unknown = set(changes) - {"status", "score", "aspects", "episodes_read", "memo"}
+    if unknown:
+        raise ValueError(f"모르는 칸: {unknown}")
+    if changes.get("status") is not None and changes["status"] not in STATUSES:
+        raise ValueError(f"모르는 상태: {changes['status']}")
+    if "score" in changes:
+        changes["score"] = _validate_score("score", changes["score"])
+    if "aspects" in changes:
+        aspects = changes["aspects"] or {}
+        bad = set(aspects) - set(ASPECTS)
+        if bad:
+            raise ValueError(f"모르는 세부 항목: {bad}")
+        changes["aspects"] = {k: _validate_score(k, v) for k, v in aspects.items() if v is not None}
+    if changes.get("episodes_read") is not None and int(changes["episodes_read"]) < 0:
+        raise ValueError("episodes_read 는 0 이상")
+    if "memo" in changes:
+        changes["memo"] = (changes["memo"] or "").strip()
+
+    current = get_review(conn, product_no) or Review(product_no, created_at=now_iso())
+    for key, value in changes.items():
+        setattr(current, key, value)
+    if current.is_empty():
+        delete_review(conn, product_no)
+        return None
+
+    current.updated_at = now_iso()
     conn.execute(
         """
-        INSERT INTO ratings (product_no, kind, score, memo, updated_at)
-        VALUES (?, ?, ?, COALESCE(?, ''), ?)
+        INSERT INTO reviews (product_no, status, score, aspects, episodes_read, memo,
+                             created_at, updated_at)
+        VALUES (:product_no, :status, :score, :aspects, :episodes_read, :memo,
+                :created_at, :updated_at)
         ON CONFLICT(product_no) DO UPDATE SET
-            kind=excluded.kind, score=excluded.score,
-            memo=COALESCE(?, ratings.memo), updated_at=excluded.updated_at
+            status=excluded.status, score=excluded.score, aspects=excluded.aspects,
+            episodes_read=excluded.episodes_read, memo=excluded.memo,
+            updated_at=excluded.updated_at
         """,
-        (product_no, kind, score, memo, now_iso(), memo),
+        {**current.__dict__, "aspects": json.dumps(current.aspects, ensure_ascii=False)},
     )
+    return current
 
 
-def delete_rating(conn: sqlite3.Connection, product_no: int) -> None:
-    conn.execute("DELETE FROM ratings WHERE product_no = ?", (product_no,))
+def delete_review(conn: sqlite3.Connection, product_no: int) -> None:
+    conn.execute("DELETE FROM reviews WHERE product_no = ?", (product_no,))
 
 
-def get_rating(conn: sqlite3.Connection, product_no: int) -> Rating | None:
-    row = conn.execute("SELECT * FROM ratings WHERE product_no = ?", (product_no,)).fetchone()
-    return Rating(**dict(row)) if row else None
+def get_review(conn: sqlite3.Connection, product_no: int) -> Review | None:
+    row = conn.execute("SELECT * FROM reviews WHERE product_no = ?", (product_no,)).fetchone()
+    return Review.from_row(row) if row else None
 
 
-def all_ratings(conn: sqlite3.Connection) -> dict[int, Rating]:
-    rows = conn.execute("SELECT * FROM ratings").fetchall()
-    return {r["product_no"]: Rating(**dict(r)) for r in rows}
+def all_reviews(conn: sqlite3.Connection) -> dict[int, Review]:
+    rows = conn.execute("SELECT * FROM reviews").fetchall()
+    return {r["product_no"]: Review.from_row(r) for r in rows}
 
 
-def ratings_with_comics(conn: sqlite3.Connection) -> list[tuple[Rating, Comic]]:
+def reviews_with_comics(conn: sqlite3.Connection) -> list[tuple[Review, Comic]]:
     rows = conn.execute(
         """
-        SELECT r.kind, r.score, r.memo, r.updated_at AS rated_at, c.*, p.label AS promo_label
-        FROM ratings r
+        SELECT r.status, r.score, r.aspects, r.episodes_read, r.memo,
+               r.created_at AS r_created_at, r.updated_at AS r_updated_at,
+               c.*, p.label AS promo_label
+        FROM reviews r
         JOIN comics c ON c.product_no = r.product_no
         LEFT JOIN free_promos p ON p.product_no = c.product_no
         ORDER BY r.updated_at DESC
@@ -342,11 +479,48 @@ def ratings_with_comics(conn: sqlite3.Connection) -> list[tuple[Rating, Comic]]:
     ).fetchall()
     return [
         (
-            Rating(r["product_no"], r["kind"], r["score"], r["memo"], r["rated_at"]),
+            Review(
+                product_no=r["product_no"],
+                status=r["status"],
+                score=r["score"],
+                aspects=json.loads(r["aspects"] or "{}"),
+                episodes_read=r["episodes_read"],
+                memo=r["memo"],
+                created_at=r["r_created_at"],
+                updated_at=r["r_updated_at"],
+            ),
             Comic.from_row(r),
         )
         for r in rows
     ]
+
+
+def migrate_ratings_v1(conn: sqlite3.Connection) -> int:
+    """v1(ratings: kind + 1~5점) → v2(reviews). 옛 테이블은 ratings_v1_backup 으로 남겨 둔다.
+
+    rated ★s → status='seen', score=s×2   (★5 → 10점, ★3 → 6점)
+    seen     → status='seen'
+    dismissed→ status='dismissed'
+    """
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ratings'"
+    ).fetchone()
+    if not exists:
+        return 0
+    rows = conn.execute("SELECT * FROM ratings").fetchall()
+    for r in rows:
+        status = "dismissed" if r["kind"] == "dismissed" else "seen"
+        score = r["score"] * 2 if r["kind"] == "rated" and r["score"] else None
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO reviews (product_no, status, score, memo, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (r["product_no"], status, score, r["memo"], r["updated_at"], r["updated_at"]),
+        )
+    conn.execute("ALTER TABLE ratings RENAME TO ratings_v1_backup")
+    conn.commit()
+    return len(rows)
 
 
 # ---------------------------------------------------------------------------

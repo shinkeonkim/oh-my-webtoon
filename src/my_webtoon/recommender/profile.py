@@ -4,44 +4,52 @@
 
     profile = Σ  weight(평가) × 작품벡터
 
-  ★5 → +2.5   ★4 → +1.5   ★3 → +0.5   ★2 → -0.5   ★1 → -1.5
-  봤음(별점 없음) → +0.5      관심 없음 → -1.0
+가중치는 "종합 점수"가 있으면 점수로, 없으면 상태로 정한다.
 
-★3 을 0 이 아니라 +0.5 로 둔 이유: 끝까지 봤다는 것 자체가 약한 긍정 신호라서.
-싫어한 작품은 음수라서, 그 작품과 닮은 작품은 점수가 깎인다.
+  종합 점수 (0~10) → (점수 - 4) × 0.4
+      10점 +2.4   8점 +1.6   6점 +0.8   5점 +0.4   4점 0   2점 -0.8   0점 -1.6
+      종합 점수를 안 줬어도 세부 점수(스토리·작화…)가 있으면 그 평균을 종합 점수로 쓴다.
 
-이후 추천 점수 = cos(profile, 후보 작품 벡터).
+  점수가 전혀 없을 때 상태로:
+      봤음 +0.5   보는 중 +0.5   보고 싶음 +0.8   하차 -0.8   관심 없음 -1.0
+
+4점을 0으로 둔 이유: 10점 척도에서 5점은 "그럭저럭 볼 만했다"는 약한 긍정이라서.
+'보고 싶음'이 '봤음'보다 큰 이유: 아직 안 본 작품을 일부러 찍어 둔 건 취향을 꽤 직접 드러내니까.
+점수와 상태를 둘 다 남겼다면 점수가 이긴다 (예: 하차했지만 6점 → +0.8).
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from ..db import Rating
+from ..db import Review
 from .features import ItemFeatures
 
-SCORE_WEIGHTS = {1: -1.5, 2: -0.5, 3: 0.5, 4: 1.5, 5: 2.5}
-SEEN_WEIGHT = 0.5
-DISMISSED_WEIGHT = -1.0
+STATUS_WEIGHTS = {
+    "seen": 0.5,
+    "watching": 0.5,
+    "wish": 0.8,
+    "dropped": -0.8,
+    "dismissed": -1.0,
+}
+SCORE_PIVOT = 4  # 이 점수가 가중치 0
+SCORE_SLOPE = 0.4
 
 
-def rating_weight(rating: Rating) -> float:
-    if rating.kind == "rated" and rating.score:
-        return SCORE_WEIGHTS[rating.score]
-    if rating.kind == "seen":
-        return SEEN_WEIGHT
-    if rating.kind == "dismissed":
-        return DISMISSED_WEIGHT
-    return 0.0
+def review_weight(review: Review) -> float:
+    overall = review.overall
+    if overall is not None:
+        return (overall - SCORE_PIVOT) * SCORE_SLOPE
+    return STATUS_WEIGHTS.get(review.status or "", 0.0)
 
 
-def build_profile(features: ItemFeatures, ratings: dict[int, Rating]) -> np.ndarray | None:
+def build_profile(features: ItemFeatures, reviews: dict[int, Review]) -> np.ndarray | None:
     """취향 벡터 (길이 1로 정규화). 긍정 신호가 하나도 없으면 None — 아직 추천할 근거가 없다."""
     rows, weights = [], []
-    for product_no, rating in ratings.items():
+    for product_no, review in reviews.items():
         if product_no in features.index:
             rows.append(features.index[product_no])
-            weights.append(rating_weight(rating))
+            weights.append(review_weight(review))
 
     if not any(w > 0 for w in weights):
         return None
@@ -52,10 +60,10 @@ def build_profile(features: ItemFeatures, ratings: dict[int, Rating]) -> np.ndar
     return profile / norm if norm > 0 else None
 
 
-def liked_rows(features: ItemFeatures, ratings: dict[int, Rating]) -> list[tuple[int, float]]:
-    """긍정적으로 평가한 작품들 (행 번호, 가중치). '이 작품과 비슷해요' 설명에 쓴다."""
+def liked_rows(features: ItemFeatures, reviews: dict[int, Review]) -> list[tuple[int, float]]:
+    """긍정적으로 평가한 작품들 (행 번호, 가중치). '닮은 작품' 설명에 쓴다."""
     return [
-        (features.index[no], rating_weight(r))
-        for no, r in ratings.items()
-        if no in features.index and rating_weight(r) > 0
+        (features.index[no], w)
+        for no, r in reviews.items()
+        if no in features.index and (w := review_weight(r)) > 0
     ]

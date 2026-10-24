@@ -1,0 +1,31 @@
+{#- 빠른 평가 위젯. 점수와 상태는 서로 독립이라 둘 다 남길 수 있다.
+    같은 버튼을 다시 누르면 그 칸만 비운다(toggle). 서버가 이 조각을 다시 렌더링해 통째로 바꾼다.
+    필요한 변수: comic, review(없으면 None), authed -#}
+{%- set no = comic.product_no -%}
+<div class="review{% if review %} has-review{% endif %}" hx-target="this" hx-swap="outerHTML">
+  {%- if authed %}
+  <div class="score-row" role="group" aria-label="점수 0~10">
+    {%- for s in SCORES %}
+    <button type="button" class="pt{% if review and review.score == s %} on{% endif %}"
+            hx-post="/reviews/{{ no }}" hx-vals='{"score": "{{ s }}", "toggle": "score"}'
+            title="{{ s }}점">{{ s }}</button>
+    {%- endfor %}
+  </div>
+  <div class="status-row" role="group" aria-label="상태">
+    {%- for key, label in STATUSES.items() %}
+    <button type="button" class="chip{% if review and review.status == key %} on{% endif %}"
+            hx-post="/reviews/{{ no }}" hx-vals='{"status": "{{ key }}", "toggle": "status"}'>{{ label }}</button>
+    {%- endfor %}
+    <button type="button" class="chip ghost" hx-get="/reviews/{{ no }}/edit">자세히 ▾</button>
+  </div>
+  {%- endif %}
+  {%- if review %}
+  <p class="summary">
+    {%- if review.score is not none %}<b>{{ review.score }}점</b>{% elif review.overall is not none %}<b>{{ '%.1f' % review.overall }}점</b><small>(세부 평균)</small>{% endif %}
+    {%- if review.status_label %}<span class="st">{{ review.status_label }}</span>{% endif %}
+    {%- if review.episodes_read is not none %}<span class="st">{{ review.episodes_read }}{{ comic.unit }}까지</span>{% endif %}
+    {%- for key, value in review.aspects.items() %}<span class="asp">{{ ASPECTS[key] }} {{ value }}</span>{% endfor %}
+    {%- if authed and review.memo %}<span class="memo">“{{ review.memo }}”</span>{% endif %}
+  </p>
+  {%- endif %}
+</div>

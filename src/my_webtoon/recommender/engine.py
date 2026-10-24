@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .. import db
-from ..db import Comic, Rating
+from ..db import Comic, Review
 from . import scoring
 from .features import ItemFeatures, build_features
 from .profile import build_profile, liked_rows
@@ -65,15 +65,15 @@ class Engine:
         features = self._load(conn)
         if features is None:
             return []
-        ratings = db.all_ratings(conn)
-        profile = build_profile(features, ratings)
+        reviews = db.all_reviews(conn)
+        profile = build_profile(features, reviews)
         if profile is None:
             return []
 
         similarities = features.matrix @ profile  # 모든 작품과 취향의 코사인 유사도 (한 번에)
-        recs = self._rank(features, similarities, opts, exclude=set(ratings))
+        recs = self._rank(features, similarities, opts, exclude=set(reviews))
         page = recs[offset : offset + limit]
-        self._explain(features, ratings, page)
+        self._explain(features, reviews, page)
         return page
 
     def similar_to(
@@ -84,8 +84,8 @@ class Engine:
             return []
         target = features.row(product_no)
         similarities = np.asarray((features.matrix @ target.T).todense()).ravel()
-        ratings = db.all_ratings(conn)
-        exclude = {product_no} | {no for no, r in ratings.items() if r.kind == "dismissed"}
+        reviews = db.all_reviews(conn)
+        exclude = {product_no} | {no for no, r in reviews.items() if r.status == "dismissed"}
         recs = self._rank(features, similarities, opts, exclude=exclude)[:limit]
         for rec in recs:
             rec.shared = self._shared_tokens(features, rec.comic.product_no, [product_no])
@@ -96,11 +96,11 @@ class Engine:
     ) -> list[Comic]:
         """콜드 스타트: 많이 본 작품 중 무료 많은 순. 여기서 '봤던 것'을 골라 평가하면 된다."""
         self._load(conn)
-        rated = set(db.all_ratings(conn))
+        reviewed = set(db.all_reviews(conn))
         candidates = [
             c
             for c in self._comics.values()
-            if c.product_no not in rated and (opts.include_adult or not scoring.is_adult(c))
+            if c.product_no not in reviewed and (opts.include_adult or not scoring.is_adult(c))
         ]
         candidates.sort(key=lambda c: -math.log1p(c.popularity or 0) * scoring.boost(c, opts))
         return candidates[:limit]
@@ -137,10 +137,10 @@ class Engine:
         return recs
 
     def _explain(
-        self, features: ItemFeatures, ratings: dict[int, Rating], recs: list[Recommendation]
+        self, features: ItemFeatures, reviews: dict[int, Review], recs: list[Recommendation]
     ) -> None:
         """'왜 추천됐는지' 채우기: 가장 닮은 좋아한 작품 + 겹치는 태그."""
-        liked = liked_rows(features, ratings)
+        liked = liked_rows(features, reviews)
         if not liked:
             return
         liked_idx = [row for row, _ in liked]

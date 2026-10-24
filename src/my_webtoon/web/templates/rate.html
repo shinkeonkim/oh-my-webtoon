@@ -22,12 +22,12 @@
   <h2>"{{ q }}" 검색 결과 {{ results | length }}개</h2>
   {% if not results %}<p class="muted">아직 수집되지 않은 작품일 수 있어요. 위에서 링크로 가져와 보세요.</p>{% endif %}
   <div class="grid">
-    {% for comic in results %}{{ card(comic, ratings.get(comic.product_no)) }}{% endfor %}
+    {% for comic in results %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}
   </div>
 {% elif popular %}
   <h2>많이 본 작품부터 훑어보기</h2>
   <div class="grid">
-    {% for comic in popular %}{{ card(comic, ratings.get(comic.product_no)) }}{% endfor %}
+    {% for comic in popular %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}
   </div>
 {% endif %}
 {% endblock %}

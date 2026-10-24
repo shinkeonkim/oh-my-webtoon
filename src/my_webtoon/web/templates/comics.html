@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_card.html" import card with context %}
+{% block title %}작품 목록 · my-webtoon{% endblock %}
+{% block content %}
+<h1>수집된 작품 <small>{{ total }}개</small></h1>
+
+<form class="filters" method="get" action="/comics">
+  <input type="search" name="q" value="{{ q }}" placeholder="제목이나 작가">
+  <select name="genre">
+    <option value="">모든 장르</option>
+    {%- for g in genres %}<option value="{{ g }}"{% if g == genre %} selected{% endif %}>{{ g }}</option>{% endfor %}
+  </select>
+  <select name="sort">
+    {%- for key, (label, _) in sorts.items() %}<option value="{{ key }}"{% if key == sort %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <button class="btn">보기</button>
+</form>
+
+<div class="grid">
+  {% for comic in comics %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}
+</div>
+<nav class="pager">
+  {% if page > 0 %}<a href="/comics?{{ query_string }}&page={{ page - 1 }}">← 이전</a>{% else %}<span></span>{% endif %}
+  {% if has_next %}<a href="/comics?{{ query_string }}&page={{ page + 1 }}">다음 →</a>{% endif %}
+</nav>
+{% endblock %}

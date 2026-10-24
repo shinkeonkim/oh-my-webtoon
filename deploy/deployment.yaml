@@ -37,6 +37,7 @@ spec:
             - { name: CRAWL_INTERVAL_HOURS, value: "6" }
             - { name: CRAWL_BATCH_SIZE, value: "300" }
             - { name: CRAWL_DELAY_SECONDS, value: "1.5" }
+            - { name: BACKUP_DIR, value: /backup }
             - { name: HOME, value: /tmp }
           envFrom:
             - secretRef:
@@ -61,10 +62,14 @@ spec:
               drop: [ALL]
           volumeMounts:
             - { name: data, mountPath: /data }
+            - { name: backup, mountPath: /backup }
             - { name: tmp, mountPath: /tmp }
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: my-webtoon-data
+        - name: backup
+          persistentVolumeClaim:
+            claimName: my-webtoon-backup
         - name: tmp
           emptyDir: {}

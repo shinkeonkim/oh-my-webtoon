@@ -29,6 +29,8 @@ class Settings:
     crawl_delay_seconds: float  # 요청 사이 간격 (네이버에 부담을 주지 않도록)
     recrawl_after_days: int  # 이 기간이 지난 작품은 다시 수집 (무료 회차 수가 바뀌므로)
     user_agent: str
+    # 하루 한 번 DB 사본을 둘 디렉터리 (다른 디스크 권장). 비어 있으면 자동 백업을 안 한다.
+    backup_dir: Path | None
 
 
 def load_settings() -> Settings:
@@ -46,4 +48,5 @@ def load_settings() -> Settings:
             "Mozilla/5.0 (compatible; my-webtoon-personal-recommender/0.1; "
             "+https://my-webtoon.shinkeonkim.com)",
         ),
+        backup_dir=Path(os.environ["BACKUP_DIR"]) if os.environ.get("BACKUP_DIR") else None,
     )

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}설정 · my-webtoon{% endblock %}
+{% block content %}
+<h1>설정</h1>
+{% if msg %}<p class="notice ok">{{ msg }}</p>{% endif %}
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+
+<section class="panel">
+  <h2>비밀번호 바꾸기</h2>
+  <form method="post" action="/settings/password" class="stack">
+    {% if auth_enabled %}<input type="password" name="current" placeholder="지금 비밀번호" required autocomplete="current-password">{% endif %}
+    <input type="password" name="new" placeholder="새 비밀번호 (8자 이상)" required minlength="8" autocomplete="new-password">
+    <input type="password" name="confirm" placeholder="새 비밀번호 한 번 더" required minlength="8" autocomplete="new-password">
+    <button class="btn">바꾸기</button>
+  </form>
+  <p class="muted small">
+    {% if password_in_db %}지금은 이 화면에서 바꾼 비밀번호를 써요.{% else %}지금은 배포 시크릿(APP_PASSWORD)의 비밀번호를 써요.{% endif %}
+    바꾸면 다른 기기의 로그인은 모두 풀려요. 해시만 저장하고 평문은 남기지 않아요.
+  </p>
+</section>
+
+<section class="panel">
+  <h2>평가 내보내기 / 가져오기</h2>
+  <p>평가 {{ review_count }}개 · 다른 기기에서 쓰던 기록을 옮기거나 직접 보관할 때 써요.</p>
+  <p><a class="btn" href="/settings/export.json">JSON 으로 내려받기</a></p>
+  <form method="post" action="/settings/import" enctype="multipart/form-data" class="inline-form">
+    <input type="file" name="file" accept="application/json" required>
+    <button class="btn">가져오기</button>
+  </form>
+  <p class="muted small">같은 작품은 파일 내용으로 덮어써요. 아직 수집 안 된 작품은 수집 대기열에 넣어요.</p>
+</section>
+
+<section class="panel">
+  <h2>자동 백업</h2>
+  {% if backup_dir %}
+  <p>하루 한 번 <code>{{ backup_dir }}</code> 에 DB 전체와 평가 JSON 을 저장해요 (최근 14개 보관).
+     마지막 백업: {{ (last_backup_at or '아직')[:16] }}</p>
+  <form method="post" action="/settings/backup"><button class="btn">지금 백업</button></form>
+  {% else %}
+  <p class="muted">BACKUP_DIR 이 설정돼 있지 않아 자동 백업이 꺼져 있어요.</p>
+  {% endif %}
+</section>
+{% endblock %}

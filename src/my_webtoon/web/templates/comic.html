@@ -23,13 +23,13 @@
     <p class="synopsis">{{ comic.synopsis }}</p>
     <p class="math">보정 배수 {{ '%.2f' % boost }}{% if stingy %} · <span class="warn">유료 위주 작품</span>{% endif %}
       · 수집 {{ comic.crawled_at[:10] }}</p>
-    {% include "_rate.html" %}
+    {% include "_review.html" %}
     <p><a class="btn" href="{{ comic.url }}" target="_blank" rel="noopener">네이버 시리즈에서 보기 ↗</a></p>
   </div>
 </section>
 
 <h2>이 작품과 비슷한 작품</h2>
 <div class="grid">
-  {% for rec in similar %}{{ card(rec.comic, ratings.get(rec.comic.product_no), rec) }}{% endfor %}
+  {% for rec in similar %}{{ card(rec.comic, reviews.get(rec.comic.product_no), rec) }}{% endfor %}
 </div>
 {% endblock %}

@@ -94,17 +94,58 @@ input[type=search], input[type=password], input[name=url], input[type=number] {
 .math { margin: 0; font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .warn { color: var(--warn); font-weight: 600; }
 
-/* 별점 위젯 */
-.rate { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: auto; padding-top: 6px; }
-.stars { display: inline-flex; }
-.star { border: 0; background: none; font-size: 1.25rem; line-height: 1; padding: 2px 1px; color: var(--line); }
-.star.on, .stars:hover .star { color: var(--star); }
-.stars .star:hover ~ .star { color: var(--line); }
+/* 평가 위젯 */
+.review { display: flex; flex-direction: column; gap: 5px; margin-top: auto; padding-top: 6px; }
+.score-row { display: flex; flex-wrap: wrap; gap: 2px; }
+.pt {
+  min-width: 24px; height: 24px; padding: 0 4px; border-radius: 6px; font-size: .75rem;
+  border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.pt:hover { border-color: var(--star); color: var(--text); }
+.pt.on { background: var(--star); border-color: var(--star); color: #1d1d1f; font-weight: 700; }
+.status-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 2px 9px; font-size: .78rem; }
 .chip.on { background: var(--text); color: var(--surface); border-color: var(--text); }
 .chip.ghost { border-color: transparent; }
-.saved { font-size: .75rem; color: var(--accent); }
-.rate.htmx-request { opacity: .5; }
+.chip.danger { color: var(--warn); }
+.summary { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; font-size: .8rem; }
+.summary b { color: var(--star); }
+.summary .st { color: var(--accent); font-weight: 600; }
+.summary .asp { color: var(--muted); }
+.summary .memo { color: var(--text); font-style: italic; }
+.review.htmx-request { opacity: .5; }
+.review-form { gap: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.review-form .fields { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.review-form label { display: flex; flex-direction: column; font-size: .72rem; color: var(--muted); }
+.review-form select, .review-form input, .review-form textarea, .filters select, .filters input {
+  font: inherit; font-size: .85rem; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); color: var(--text);
+}
+.review-form input[type=number] { width: 80px; }
+.review-form textarea { width: 100%; resize: vertical; }
+.review-form .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.hint, .small { font-size: .75rem; color: var(--muted); margin: 0; }
+
+/* 순위 */
+.card .thumb { position: relative; }
+.rank {
+  position: absolute; top: -6px; left: -6px; min-width: 24px; height: 24px; padding: 0 6px;
+  border-radius: 999px; background: var(--accent); color: #fff; font-size: .75rem; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* 탭 / 필터 / 패널 */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.tabs a { text-decoration: none; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: .85rem; }
+.tabs a.on { background: var(--text); color: var(--surface); border-color: var(--text); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.filters input[type=search] { flex: 1; min-width: 160px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 16px 16px; margin-bottom: 12px; }
+.stack { display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
+.inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.notice.ok { color: var(--accent); }
+.notice.error { color: var(--warn); }
+code { font-size: .85em; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
 
 /* 안내 / 폼 */
 .notice { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }

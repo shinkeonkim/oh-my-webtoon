@@ -40,15 +40,16 @@ CREATE TABLE IF NOT EXISTS free_promos (
     seen_at         TEXT    NOT NULL
 );
 
--- 내 평가. 작품당 하나.
---   rated     : 별점(1~5)을 줬다
---   seen      : 봤는데 별점은 아직
---   dismissed : 관심 없음 (다시 추천하지 마)
-CREATE TABLE IF NOT EXISTS ratings (
+-- 내 평가. 작품당 하나. 모든 칸이 선택 사항이라 "봤음"만, "8점"만, 둘 다, 세부 점수까지 자유롭게 남긴다.
+CREATE TABLE IF NOT EXISTS reviews (
     product_no      INTEGER PRIMARY KEY REFERENCES comics(product_no),
-    kind            TEXT    NOT NULL CHECK (kind IN ('rated', 'seen', 'dismissed')),
-    score           INTEGER CHECK (score BETWEEN 1 AND 5),
+    status          TEXT CHECK (status IN ('seen', 'watching', 'dropped', 'wish', 'dismissed')),
+                                                    -- 봤음 / 보는 중 / 하차 / 보고 싶음 / 관심 없음
+    score           INTEGER CHECK (score BETWEEN 0 AND 10),   -- 종합 점수 0~10
+    aspects         TEXT    NOT NULL DEFAULT '{}',  -- JSON: {"story": 9, "art": 7} — 항목은 db.ASPECTS
+    episodes_read   INTEGER CHECK (episodes_read >= 0),       -- 몇 화까지 봤는지
     memo            TEXT    NOT NULL DEFAULT '',
+    created_at      TEXT    NOT NULL,
     updated_at      TEXT    NOT NULL
 );
 

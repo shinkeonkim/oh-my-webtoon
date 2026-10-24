@@ -8,13 +8,13 @@
 </section>
 {% elif not recs %}
 <section class="notice">
-  <p><b>내가 본 웹툰을 먼저 평가해 주세요.</b> 좋아한 작품(★3 이상 또는 "봤음")이 하나라도 있으면 추천이 시작돼요.</p>
+  <p><b>내가 본 웹툰을 먼저 평가해 주세요.</b> 점수(5점 이상)나 "봤음"·"보고 싶음" 같은 긍정 평가가 하나라도 있으면 추천이 시작돼요.</p>
   <p><a class="btn" href="/rate">검색해서 평가하기 →</a></p>
 </section>
 {% if popular %}
 <h2>많이 본 작품 — 본 게 있다면 바로 평가해 보세요</h2>
 <div class="grid">
-  {% for comic in popular %}{{ card(comic, ratings.get(comic.product_no)) }}{% endfor %}
+  {% for comic in popular %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}
 </div>
 {% endif %}
 
@@ -33,9 +33,9 @@
   </form>
 </details>
 
-<p class="meta-line">평가 {{ ratings | length }}개 기반 · 수집된 작품 {{ stats.comics }}개 중 추천</p>
+<p class="meta-line">평가 {{ reviews | length }}개 기반 · 수집된 작품 {{ stats.comics }}개 중 최종 점수 높은 순 (유료 위주 작품은 맨 뒤) · 평가하면 그 카드만 바뀌고, 순위는 새로고침하면 다시 계산돼요</p>
 <div class="grid">
-  {% for rec in recs %}{{ card(rec.comic, ratings.get(rec.comic.product_no), rec) }}{% endfor %}
+  {% for rec in recs %}{{ card(rec.comic, reviews.get(rec.comic.product_no), rec, rank_offset + loop.index) }}{% endfor %}
 </div>
 <nav class="pager">
   {% if page > 0 %}<a href="/?{{ query_string }}&page={{ page - 1 }}">← 이전</a>{% endif %}
