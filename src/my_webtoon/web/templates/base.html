@@ -5,38 +5,62 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>{% block title %}my-webtoon{% endblock %}</title>
+  <link rel="icon" href="/static/favicon.svg?v={{ static_version }}" type="image/svg+xml">
+  <link rel="icon" href="/static/icon-192.png?v={{ static_version }}" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v={{ static_version }}">
+  <link rel="manifest" href="/static/manifest.webmanifest?v={{ static_version }}">
+  <meta name="theme-color" content="#00a862">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
   {#- ?v= 는 파일 내용 해시. CSS 를 바꾸면 주소가 바뀌어 브라우저 캐시가 옛 스타일을 쓰지 않는다. #}
   <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
   <script src="/static/htmx.min.js?v={{ static_version }}" defer></script>
 </head>
 <body>
+  {%- import "_ui.html" as ui %}
   {%- set path = request.url.path %}
+  {#- 메뉴는 여기서 한 번만 정의하고, 데스크톱(위 가로 메뉴)과 모바일(아래 탭바) 두 곳에 그린다.
+      (주소, 라벨, 아이콘, 선택됨, 모바일 탭바에도 보일지) -#}
+  {%- set my_page = '/users/' ~ user.username if user else '/users' %}
+  {%- if authed %}
+    {%- set menu = [
+      ('/', '추천', 'sparkle', path == '/', true),
+      ('/rate', '평가하기', 'star-outline', path == '/rate', true),
+      ('/comics', '작품', 'grid', path == '/comics' or path.startswith('/comic/'), true),
+      (my_page, '평가 기록', 'list', path.startswith('/users'), true),
+      ('/crawl', '수집', 'more', path == '/crawl', false),
+      ('/settings', '설정', 'more', path == '/settings', false),
+    ] %}
+  {%- else %}
+    {%- set menu = [
+      ('/comics', '작품', 'grid', path == '/comics' or path.startswith('/comic/'), true),
+      (my_page, '평가 기록', 'list', path.startswith('/users'), true),
+      ('/login', '로그인', 'user', path == '/login', true),
+    ] %}
+  {%- endif %}
   <header class="topbar">
     <div class="topbar__inner">
-      <a class="brand" href="{{ '/' if authed else '/comics' }}">my-webtoon</a>
-      <nav class="nav">
-        {%- if authed %}
-        <a href="/" class="{{ 'is-on' if path == '/' }}">추천</a>
-        <a href="/rate" class="{{ 'is-on' if path == '/rate' }}">평가하기</a>
-        {%- endif %}
-        <a href="/comics" class="{{ 'is-on' if path == '/comics' or path.startswith('/comic/') }}">작품</a>
-        <a href="{{ '/users/' ~ user.username if user else '/users' }}" class="{{ 'is-on' if path.startswith('/users') }}">평가 기록</a>
-        {%- if authed %}
-        <a href="/crawl" class="{{ 'is-on' if path == '/crawl' }}">수집</a>
-        <a href="/settings" class="{{ 'is-on' if path == '/settings' }}">설정</a>
-        {%- endif %}
+      <a class="brand" href="{{ '/' if authed else '/comics' }}"><img src="/static/favicon.svg?v={{ static_version }}" alt="" width="24" height="24">my-webtoon</a>
+      <nav class="nav" aria-label="메뉴">
+        {%- for href, label, _icon, on, _ in menu %}
+        <a href="{{ href }}" class="{{ 'is-on' if on }}"{{ ' aria-current="page"' if on }}>{{ label }}</a>
+        {%- endfor %}
       </nav>
       <div class="topbar__user">
         {%- if authed and can_logout %}
-        <span>{{ user.username }}</span>
+        <span class="topbar__name">{{ user.username }}</span>
         <form method="post" action="/logout" class="inline"><button class="btn btn--ghost btn--sm">로그아웃</button></form>
-        {%- elif not authed %}
-        <a class="btn btn--secondary btn--sm" href="/login">로그인</a>
         {%- endif %}
       </div>
     </div>
   </header>
+  <nav class="tabbar" aria-label="메뉴">
+    {%- for href, label, icon_name, on, in_tabbar in menu if in_tabbar %}
+    <a href="{{ href }}" class="tabbar__item{{ ' is-on' if on }}"{{ ' aria-current="page"' if on }}>{{ ui.icon(icon_name, 22) }}<span>{{ label }}</span></a>
+    {%- endfor %}
+    {%- if authed %}
+    <a href="/settings" class="tabbar__item{{ ' is-on' if path in ('/settings', '/crawl') }}">{{ ui.icon('more', 22) }}<span>더보기</span></a>
+    {%- endif %}
+  </nav>
   <main>
     {%- if user and user.is_demo %}
     <p class="alert alert--info">시연용 계정이에요. 자유롭게 평가해 보세요 — 평가는 매일 밤 처음 상태로 돌아가고, 비밀번호 변경·가져오기는 막혀 있어요.</p>

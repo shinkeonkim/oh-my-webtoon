@@ -284,3 +284,17 @@ def test_next_crawl_waits_for_interval():
     assert next_run_delay(None, 3600, now) == 0  # 처음이면 바로
     assert next_run_delay((now - timedelta(minutes=20)).isoformat(), 3600, now) == 2400
     assert next_run_delay((now - timedelta(hours=2)).isoformat(), 3600, now) == 0
+
+
+def test_mobile_tabbar_and_favicon(client):
+    page = client.get("/").text
+    assert 'class="tabbar"' in page and 'rel="icon" href="/static/favicon.svg' in page
+    for path in (
+        "/static/favicon.svg",
+        "/static/apple-touch-icon.png",
+        "/static/manifest.webmanifest",
+    ):
+        assert client.get(path).status_code == 200, path
+    tabbar = page.split('class="tabbar"', 1)[1].split("</nav>", 1)[0]
+    assert all(label in tabbar for label in ("추천", "평가하기", "작품", "평가 기록", "더보기"))
+    assert "수집 현황" in client.get("/settings").text  # 탭바에 없는 메뉴는 '더보기'(설정)에서

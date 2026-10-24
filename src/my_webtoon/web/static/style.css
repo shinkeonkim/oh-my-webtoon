@@ -234,13 +234,40 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
 /* 상단 바 */
 .topbar { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 .topbar__inner { max-width: 1120px; margin: 0 auto; padding: 0 var(--space-4); height: 56px; display: flex; align-items: center; gap: var(--space-4); }
-.brand { font-weight: 800; font-size: var(--text-lg); text-decoration: none; color: var(--accent); letter-spacing: -0.02em; flex: none; }
+.brand { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 800; font-size: var(--text-lg); text-decoration: none; color: var(--accent); letter-spacing: -0.02em; flex: none; }
+.brand img { border-radius: 6px; }
 .nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1; }
 .nav::-webkit-scrollbar { display: none; }
 .nav a { flex: none; text-decoration: none; padding: 6px 10px; border-radius: var(--radius-sm); color: var(--text-2); font-size: var(--text-sm); font-weight: 500; }
 .nav a:hover { color: var(--text); background: var(--surface-2); }
 .nav a.is-on { color: var(--text); font-weight: 700; }
 .topbar__user { flex: none; display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-3); }
+
+/* 모바일 하단 탭바 — 좁은 화면에선 위 가로 메뉴 대신 엄지가 닿는 아래쪽에 */
+.tabbar { display: none; }
+@media (max-width: 720px) {
+  .nav, .topbar__name { display: none; }
+  .topbar__inner { height: 52px; justify-content: space-between; }
+  .tabbar {
+    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    padding: 6px var(--space-2) calc(6px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line);
+  }
+  .tabbar__item {
+    display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0;
+    text-decoration: none; color: var(--text-3); font-size: 11px; font-weight: 600; border-radius: var(--radius-sm);
+  }
+  .tabbar__item.is-on { color: var(--accent); }
+  .tabbar__item:active { background: var(--surface-2); }
+  body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  main { padding-top: var(--space-4); }
+}
+.shortcuts { display: none; }
+@media (max-width: 720px) {
+  .shortcuts { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3); margin-bottom: var(--space-4); }
+}
 
 main { max-width: 1120px; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-6); }
 footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); padding: var(--space-6) var(--space-4); }

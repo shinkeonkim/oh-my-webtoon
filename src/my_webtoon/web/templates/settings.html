@@ -4,6 +4,13 @@
 {% block content %}
 {{ ui.page_header('설정', user.username ~ (' · 관리자' if user.is_admin else '')) }}
 {% if msg %}<p class="alert alert--ok">{{ msg }}</p>{% endif %}
+
+{#- 모바일 탭바의 '더보기'가 이 화면이라, 탭바에 없는 메뉴를 여기서 이어 준다 -#}
+<nav class="panel shortcuts" aria-label="더보기">
+  {{ ui.button('수집 현황', 'secondary', href='/crawl') }}
+  {{ ui.button('UI 컴포넌트', 'ghost', href='/ui') }}
+  {%- if can_logout %}<form method="post" action="/logout" class="inline">{{ ui.button('로그아웃', 'danger') }}</form>{% endif %}
+</nav>
 {% if error %}<p class="alert alert--error">{{ error }}</p>{% endif %}
 
 {% if not user.is_demo %}
