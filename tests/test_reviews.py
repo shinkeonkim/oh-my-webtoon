@@ -167,3 +167,11 @@ def test_invalid_usernames(library, name):
 def test_duplicate_username(library):
     with db.session(library) as conn, pytest.raises(ValueError):
         db.create_user(conn, "SINGUN11", None)  # 대소문자 구분 없이 같은 아이디
+
+
+def test_reviews_with_comics_keeps_both_statuses(library):
+    """평가 상태(봤음)와 작품 연재 상태(연재중)는 이름이 같아도 섞이지 않아야 한다."""
+    with db.session(library) as conn:
+        db.update_review(conn, ME, 1, status="seen")
+        [(review, comic)] = db.reviews_with_comics(conn, ME)
+    assert review.status == "seen" and comic.status == "연재중"

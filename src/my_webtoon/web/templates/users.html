@@ -1,11 +1,13 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}사용자 · my-webtoon{% endblock %}
 {% block content %}
-<h1>사용자</h1>
-<p class="muted">작품 데이터는 모두가 함께 쓰고, 평가와 추천은 사람마다 따로예요.</p>
-<ul class="user-list">
-  {% for u, count in users %}
-  <li><a href="/users/{{ u.username }}"><b>{{ u.username }}</b></a> <span class="muted">평가 {{ count }}개</span></li>
-  {% endfor %}
-</ul>
+{{ ui.page_header('사용자', '작품 데이터는 함께 쓰고, 평가와 추천은 사람마다 따로예요') }}
+<section class="panel">
+  <ul class="list">
+    {% for u, count in users %}
+    <li><a href="/users/{{ u.username }}">{{ u.username }}</a><span class="muted small">평가 {{ count }}개</span></li>
+    {% endfor %}
+  </ul>
+</section>
 {% endblock %}

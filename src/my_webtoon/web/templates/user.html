@@ -1,31 +1,23 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% from "_card.html" import card with context %}
 {% block title %}{{ owner.username }} 의 평가 · my-webtoon{% endblock %}
 {% block content %}
-<h1>{{ owner.username }} 의 평가 기록 <small>{{ total }}개 중 {{ items | length }}개</small></h1>
-
+{{ ui.page_header(owner.username ~ ' 의 평가', total ~ '개 중 ' ~ (items | length) ~ '개' ~ ('' if is_owner else ' · 읽기 전용')) }}
 {%- macro qs(status_v, score_v) -%}
-?{{ 'status=' ~ status_v if status_v }}{{ '&' if status_v and score_v }}{{ 'score=' ~ score_v if score_v }}
+/users/{{ owner.username }}?{{ 'status=' ~ status_v if status_v }}{{ '&' if status_v and score_v }}{{ 'score=' ~ score_v if score_v }}
 {%- endmacro %}
-<nav class="tabs" aria-label="상태">
-  <a href="{{ qs('', score) }}" class="{{ 'on' if not status }}">모든 상태</a>
-  {%- for key, label in STATUSES.items() %}
-  <a href="{{ qs(key, score) }}" class="{{ 'on' if status == key }}">{{ label }} <small>{{ status_counts[key] }}</small></a>
-  {%- endfor %}
-  <a href="{{ qs('none', score) }}" class="{{ 'on' if status == 'none' }}">상태 없음</a>
-</nav>
-<nav class="tabs" aria-label="점수">
-  <a href="{{ qs(status, '') }}" class="{{ 'on' if not score }}">모든 점수</a>
-  {%- for key, label in score_filters.items() %}
-  <a href="{{ qs(status, key) }}" class="{{ 'on' if score == key }}">{{ label }} <small>{{ score_counts[key] }}</small></a>
-  {%- endfor %}
-</nav>
-
-{% if not items %}
-<p class="muted">조건에 맞는 평가가 없어요.{% if is_owner and not total %} <a href="/rate">평가하러 가기</a>{% endif %}</p>
-{% endif %}
-<p class="muted small">점수 높은 순 · 점수가 없으면 뒤에{% if not is_owner %} · 읽기 전용{% endif %}</p>
-<div class="grid">
-  {% for review, comic in items %}{{ card(comic, review, editable=is_owner) }}{% endfor %}
+<div class="filters mb-4">
+  {%- set status_items = [(qs('', score), '모든 상태', none, not status)] %}
+  {%- for key, label in STATUSES.items() %}{% set _ = status_items.append((qs(key, score), label, status_counts[key], status == key)) %}{% endfor %}
+  {%- set _ = status_items.append((qs('none', score), '상태 없음', none, status == 'none')) %}
+  {{ ui.tabs(status_items, '상태') }}
+  {%- set score_items = [(qs(status, ''), '모든 별점', none, not score)] %}
+  {%- for key, label in score_filters.items() %}{% set _ = score_items.append((qs(status, key), label, score_counts[key], score == key)) %}{% endfor %}
+  {{ ui.tabs(score_items, '별점') }}
 </div>
+{% if not items %}
+  {% call ui.empty() %}조건에 맞는 평가가 없어요.{% if is_owner and not total %}<br>{{ ui.button('평가하러 가기', 'primary', href='/rate') }}{% endif %}{% endcall %}
+{% endif %}
+<div class="grid">{% for review, comic in items %}{{ card(comic, review, editable=is_owner) }}{% endfor %}</div>
 {% endblock %}

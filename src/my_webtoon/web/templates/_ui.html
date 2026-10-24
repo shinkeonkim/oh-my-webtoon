@@ -1,0 +1,107 @@
+{#- ============================================================================
+    공통 UI 컴포넌트. 화면은 전부 이 매크로들을 조합해서 만든다 — 페이지마다 새 스타일을 만들지 않는다.
+    모양은 static/style.css 의 "컴포넌트" 절이 정하고, 전체 목록은 /ui (스타일 가이드) 에서 볼 수 있다.
+
+    사용:  {% import "_ui.html" as ui %}  →  {{ ui.button("저장", "primary") }}
+    ============================================================================ -#}
+
+{#- 아이콘 (인라인 SVG, 색은 currentColor) -#}
+{% macro icon(name, size=16) -%}
+<svg class="icon" width="{{ size }}" height="{{ size }}" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+{%- if name == 'star' %}<path fill="currentColor" stroke="none" d="M10 1.6l2.55 5.17 5.7.83-4.13 4.02.98 5.68L10 14.62l-5.1 2.68.98-5.68L1.75 7.6l5.7-.83z"/>
+{%- elif name == 'search' %}<circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/>
+{%- elif name == 'chevron' %}<path d="M5.5 8l4.5 4.5L14.5 8"/>
+{%- elif name == 'external' %}<path d="M11.5 3.5h5v5M16.5 3.5L9 11M14 11.5v4a1 1 0 01-1 1H4.5a1 1 0 01-1-1V7a1 1 0 011-1h4"/>
+{%- elif name == 'edit' %}<path d="M13.5 3.5l3 3L7 16H4v-3z"/>
+{%- elif name == 'x' %}<path d="M5 5l10 10M15 5L5 15"/>
+{%- elif name == 'clock' %}<circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.5 1.5"/>
+{%- endif %}</svg>
+{%- endmacro %}
+
+{#- 버튼. variant: primary | secondary | ghost | danger, size: md | sm. href 가 있으면 링크. -#}
+{% macro button(label, variant="secondary", size="md", href=None, type="submit", attrs="", icon_name=None) -%}
+{%- set cls = "btn btn--" ~ variant ~ (" btn--sm" if size == "sm" else "") -%}
+{%- if href -%}
+<a class="{{ cls }}" href="{{ href }}" {{ attrs | safe }}>{% if icon_name %}{{ icon(icon_name) }}{% endif %}<span>{{ label }}</span></a>
+{%- else -%}
+<button class="{{ cls }}" type="{{ type }}" {{ attrs | safe }}>{% if icon_name %}{{ icon(icon_name) }}{% endif %}<span>{{ label }}</span></button>
+{%- endif -%}
+{%- endmacro %}
+
+{#- 아이콘만 있는 버튼 -#}
+{% macro icon_button(name, label, attrs="") -%}
+<button class="icon-btn" type="button" title="{{ label }}" aria-label="{{ label }}" {{ attrs | safe }}>{{ icon(name) }}</button>
+{%- endmacro %}
+
+{#- 배지 (작은 정보 표시). tone: neutral | accent | solid | warn | promo -#}
+{% macro badge(text, tone="neutral", icon_name=None) -%}
+<span class="badge badge--{{ tone }}">{% if icon_name %}{{ icon(icon_name, 12) }}{% endif %}{{ text }}</span>
+{%- endmacro %}
+
+{#- 토글 칩 (선택 상태가 있는 작은 버튼) -#}
+{% macro chip(label, on=False, attrs="") -%}
+<button class="chip{{ ' is-on' if on }}" type="button" aria-pressed="{{ 'true' if on else 'false' }}" {{ attrs | safe }}>{{ label }}</button>
+{%- endmacro %}
+
+{#- 입력 칸 묶음: 라벨 + 내용 (caller 로 input/select 를 넣는다) -#}
+{% macro field(label, hint=None) -%}
+<label class="field"><span class="field__label">{{ label }}</span>{{ caller() }}{% if hint %}<span class="field__hint">{{ hint }}</span>{% endif %}</label>
+{%- endmacro %}
+
+{#- 셀렉트. options: [(값, 라벨), ...] -#}
+{% macro select(name, options, selected="", placeholder=None, attrs="") -%}
+<span class="select"><select name="{{ name }}" {{ attrs | safe }}>
+  {%- if placeholder is not none %}<option value="">{{ placeholder }}</option>{% endif %}
+  {%- for value, label in options %}<option value="{{ value }}"{{ ' selected' if value | string == selected | string }}>{{ label }}</option>{% endfor %}
+</select>{{ icon('chevron', 14) }}</span>
+{%- endmacro %}
+
+{#- 탭 (필터 줄). items: [(href, 라벨, 개수 또는 None, 선택됨), ...] -#}
+{% macro tabs(items, aria_label) -%}
+<nav class="tabs" aria-label="{{ aria_label }}">
+  {%- for href, label, count, on in items %}
+  <a class="tabs__item{{ ' is-on' if on }}" href="{{ href }}">{{ label }}{% if count is not none %}<span class="tabs__count">{{ count }}</span>{% endif %}</a>
+  {%- endfor %}
+</nav>
+{%- endmacro %}
+
+{#- 별점 표시 (읽기 전용). score: 0~10 (= 별 0~5개, 반 개 단위) -#}
+{% macro stars(score, size="md") -%}
+<span class="stars stars--{{ size }}" title="{{ score }}점 / 10" aria-label="별 {{ score / 2 }}개">
+  <span class="stars__track">
+    {%- for v in range(10, 0, -1) %}<span class="stars__half stars__half--{{ 'r' if v % 2 == 0 else 'l' }}{{ ' is-on' if score >= v }}">{{ icon('star', 20) }}</span>{% endfor -%}
+  </span>
+  <span class="stars__value">{{ format_stars(score) }}</span>
+</span>
+{%- endmacro %}
+
+{#- 별점 입력. 반 개 = 1점. 같은 값을 다시 누르면 지운다(toggle). '0' 은 별 0개(0점)를 따로 준다.
+    DOM 은 10→1 순서 + row-reverse 라서, CSS 만으로 '마우스를 올린 곳까지' 미리보기가 된다. -#}
+{% macro star_input(product_no, score) -%}
+<span class="stars stars--input" role="group" aria-label="별점 (반 개 단위)">
+  <button type="button" class="stars__zero{{ ' is-on' if score == 0 }}" title="별 0개 (0점)"
+          hx-post="/reviews/{{ product_no }}" hx-vals='{"score": "0", "toggle": "score"}'>0</button>
+  <span class="stars__track">
+    {%- for v in range(10, 0, -1) %}
+    <button type="button" class="stars__half stars__half--{{ 'r' if v % 2 == 0 else 'l' }}{{ ' is-on' if score is not none and score >= v }}"
+            title="별 {{ format_stars(v) }}개 ({{ v }}점)" aria-label="별 {{ format_stars(v) }}개"
+            hx-post="/reviews/{{ product_no }}" hx-vals='{"score": "{{ v }}", "toggle": "score"}'>{{ icon('star', 20) }}</button>
+    {%- endfor %}
+  </span>
+  <span class="stars__value">{{ format_stars(score) if score is not none else '–' }}</span>
+</span>
+{%- endmacro %}
+
+{#- 비어 있을 때 안내 -#}
+{% macro empty(text) -%}
+<div class="empty">{{ caller() if caller else text }}</div>
+{%- endmacro %}
+
+{#- 페이지 머리말: 제목 + 보조 설명 -#}
+{% macro page_header(title, subtitle=None) -%}
+<header class="page-header">
+  <h1>{{ title }}</h1>
+  {% if subtitle %}<p class="page-header__sub">{{ subtitle }}</p>{% endif %}
+  {% if caller %}<div class="page-header__actions">{{ caller() }}</div>{% endif %}
+</header>
+{%- endmacro %}

@@ -1,44 +1,27 @@
-{#- 세부 평가 폼. 모든 칸이 선택 사항 — 비워 두면 '없음'으로 저장된다. -#}
+{#- 세부 평가 폼. 모든 칸이 선택 사항 — 비워 두면 '없음'으로 저장된다. 점수는 별 개수(0~5, 반 개 단위)로 고른다. -#}
+{% import "_ui.html" as ui %}
 {%- set no = comic.product_no -%}
+{%- set star_options = SCORES | map('star_option') | list -%}
 <form class="review review-form" hx-post="/reviews/{{ no }}" hx-target="this" hx-swap="outerHTML">
   <input type="hidden" name="full" value="1">
-  <div class="fields">
-    <label>종합 점수
-      <select name="score">
-        <option value="">–</option>
-        {%- for s in SCORES %}<option value="{{ s }}"{% if review and review.score == s %} selected{% endif %}>{{ s }}</option>{% endfor %}
-      </select>
-    </label>
-    <label>상태
-      <select name="status">
-        <option value="">–</option>
-        {%- for key, label in STATUSES.items() %}<option value="{{ key }}"{% if review and review.status == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      </select>
-    </label>
-    <label>본 화수
-      <input type="number" name="episodes_read" min="0" inputmode="numeric"
-             value="{{ review.episodes_read if review and review.episodes_read is not none else '' }}"
-             placeholder="{{ comic.total_episodes or '' }}">
-    </label>
+  <div class="review-form__grid">
+    {% call ui.field('종합') %}{{ ui.select('score', star_options, review.score if review and review.score is not none else '', '–') }}{% endcall %}
+    {% call ui.field('상태') %}{{ ui.select('status', STATUSES.items(), review.status if review and review.status else '', '–') }}{% endcall %}
+    {% call ui.field('본 ' ~ comic.unit ~ '수') %}<input class="input" type="number" name="episodes_read" min="0" inputmode="numeric"
+        value="{{ review.episodes_read if review and review.episodes_read is not none else '' }}" placeholder="{{ comic.total_episodes or '' }}">{% endcall %}
   </div>
-  <div class="fields aspects">
+  <div class="review-form__grid">
     {%- for key, label in ASPECTS.items() %}
-    <label>{{ label }}
-      <select name="aspect_{{ key }}">
-        <option value="">–</option>
-        {%- for s in SCORES %}<option value="{{ s }}"{% if review and review.aspects.get(key) == s %} selected{% endif %}>{{ s }}</option>{% endfor %}
-      </select>
-    </label>
+    {% call ui.field(label) %}{{ ui.select('aspect_' ~ key, star_options, review.aspects.get(key, '') if review else '', '–') }}{% endcall %}
     {%- endfor %}
   </div>
-  <textarea name="memo" rows="2" placeholder="한 줄 메모 (로그인했을 때만 보여요)">{{ review.memo if review else '' }}</textarea>
-  <p class="hint">종합 점수를 비우고 세부 점수만 남기면, 세부 점수 평균을 종합 점수로 써서 추천해요.</p>
-  <div class="actions">
-    <button class="btn">저장</button>
-    <button type="button" class="chip" hx-get="/reviews/{{ no }}/widget">닫기</button>
+  {% call ui.field('메모', '나에게만 보여요') %}<textarea class="input" name="memo" rows="2">{{ review.memo if review else '' }}</textarea>{% endcall %}
+  <p class="field__hint">종합을 비우고 세부 점수만 남기면 세부 평균을 종합으로 써서 추천해요.</p>
+  <div class="review-form__actions">
+    {{ ui.button('저장', 'primary', 'sm') }}
+    {{ ui.button('닫기', 'ghost', 'sm', type='button', attrs='hx-get="/reviews/' ~ no ~ '/widget"') }}
     {%- if review %}
-    <button type="button" class="chip danger" hx-post="/reviews/{{ no }}/delete"
-            hx-confirm="이 작품의 평가를 전부 지울까요?">평가 삭제</button>
+    {{ ui.button('평가 삭제', 'danger', 'sm', type='button', attrs='hx-post="/reviews/' ~ no ~ '/delete" hx-confirm="이 작품의 평가를 전부 지울까요?"') }}
     {%- endif %}
   </div>
 </form>

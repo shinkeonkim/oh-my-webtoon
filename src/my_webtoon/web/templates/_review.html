@@ -1,30 +1,30 @@
-{#- 빠른 평가 위젯. 점수와 상태는 서로 독립이라 둘 다 남길 수 있다.
-    같은 버튼을 다시 누르면 그 칸만 비운다(toggle). 서버가 이 조각을 다시 렌더링해 통째로 바꾼다.
+{#- 평가 위젯. 별점(반 개 단위)과 상태는 서로 독립이라 둘 다 남길 수 있다. 같은 걸 다시 누르면 그 칸만 지운다.
+    누를 때마다 서버가 이 조각을 다시 렌더링해 통째로 바꾼다 (HTMX).
     필요한 변수: comic, review(없으면 None), editable(내 평가인지), show_memo -#}
+{% import "_ui.html" as ui %}
 {%- set no = comic.product_no -%}
-<div class="review{% if review %} has-review{% endif %}" hx-target="this" hx-swap="outerHTML">
+<div class="review" hx-target="this" hx-swap="outerHTML">
   {%- if editable %}
-  <div class="score-row" role="group" aria-label="점수 0~10">
-    {%- for s in SCORES %}
-    <button type="button" class="pt{% if review and review.score == s %} on{% endif %}"
-            hx-post="/reviews/{{ no }}" hx-vals='{"score": "{{ s }}", "toggle": "score"}'
-            title="{{ s }}점">{{ s }}</button>
+  <div class="review__top">
+    {{ ui.star_input(no, review.score if review else none) }}
+    {{ ui.icon_button('edit', '세부 평가·메모', 'hx-get="/reviews/' ~ no ~ '/edit"') }}
+  </div>
+  <div class="review__statuses" role="group" aria-label="상태">
+    {%- for key, label in STATUSES.items() %}
+    {{ ui.chip(label, review and review.status == key, 'hx-post="/reviews/' ~ no ~ '" hx-vals=\'{"status": "' ~ key ~ '", "toggle": "status"}\'') }}
     {%- endfor %}
   </div>
-  <div class="status-row" role="group" aria-label="상태">
-    {%- for key, label in STATUSES.items() %}
-    <button type="button" class="chip{% if review and review.status == key %} on{% endif %}"
-            hx-post="/reviews/{{ no }}" hx-vals='{"status": "{{ key }}", "toggle": "status"}'>{{ label }}</button>
-    {%- endfor %}
-    <button type="button" class="chip ghost" hx-get="/reviews/{{ no }}/edit">자세히 ▾</button>
+  {%- elif review %}
+  <div class="review__top">
+    {%- if review.overall is not none %}{{ ui.stars(review.overall | round | int, 'sm') }}{% else %}<span></span>{% endif %}
+    {%- if review.status_label %}{{ ui.badge(review.status_label, 'accent') }}{% endif %}
   </div>
   {%- endif %}
-  {%- if review %}
-  <p class="summary">
-    {%- if review.score is not none %}<b>{{ review.score }}점</b>{% elif review.overall is not none %}<b>{{ '%.1f' % review.overall }}점</b><small>(세부 평균)</small>{% endif %}
-    {%- if review.status_label %}<span class="st">{{ review.status_label }}</span>{% endif %}
-    {%- if review.episodes_read is not none %}<span class="st">{{ review.episodes_read }}{{ comic.unit }}까지</span>{% endif %}
-    {%- for key, value in review.aspects.items() %}<span class="asp">{{ ASPECTS[key] }} {{ value }}</span>{% endfor %}
+  {%- if review and (review.aspects or review.episodes_read is not none or (show_memo and review.memo) or (review.score is none and review.aspects)) %}
+  <p class="review__meta">
+    {%- if review.score is none and review.aspects %}<span>세부 평균 {{ '%.1f' % (review.overall / 2) }}</span>{% endif %}
+    {%- if review.episodes_read is not none %}<span>{{ review.episodes_read }}{{ comic.unit }}까지 봄</span>{% endif %}
+    {%- for key, value in review.aspects.items() %}<span>{{ ASPECTS[key] }} {{ format_stars(value) }}</span>{% endfor %}
     {%- if show_memo and review.memo %}<span class="memo">“{{ review.memo }}”</span>{% endif %}
   </p>
   {%- endif %}

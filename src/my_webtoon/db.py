@@ -487,9 +487,10 @@ def all_reviews(conn: sqlite3.Connection, user_id: int | None) -> dict[int, Revi
 def reviews_with_comics(conn: sqlite3.Connection, user_id: int) -> list[tuple[Review, Comic]]:
     rows = conn.execute(
         """
-        SELECT r.status, r.score, r.aspects, r.episodes_read, r.memo,
-               r.created_at AS r_created_at, r.updated_at AS r_updated_at,
-               c.*, p.label AS promo_label
+        SELECT c.*, p.label AS promo_label,
+               r.status AS r_status, r.score AS r_score, r.aspects AS r_aspects,
+               r.episodes_read AS r_episodes_read, r.memo AS r_memo,
+               r.created_at AS r_created_at, r.updated_at AS r_updated_at
         FROM reviews r
         JOIN comics c ON c.product_no = r.product_no
         LEFT JOIN free_promos p ON p.product_no = c.product_no
@@ -502,11 +503,11 @@ def reviews_with_comics(conn: sqlite3.Connection, user_id: int) -> list[tuple[Re
         (
             Review(
                 product_no=r["product_no"],
-                status=r["status"],
-                score=r["score"],
-                aspects=json.loads(r["aspects"] or "{}"),
-                episodes_read=r["episodes_read"],
-                memo=r["memo"],
+                status=r["r_status"],  # comics 에도 status(연재중/완결)가 있어서 이름을 나눈다
+                score=r["r_score"],
+                aspects=json.loads(r["r_aspects"] or "{}"),
+                episodes_read=r["r_episodes_read"],
+                memo=r["r_memo"],
                 created_at=r["r_created_at"],
                 updated_at=r["r_updated_at"],
             ),

@@ -38,17 +38,18 @@ def login(c, username="singun11", password="initial-pw"):
 def test_onboarding_when_no_reviews(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "먼저 평가해 주세요" in resp.text
+    assert "추천을 시작하려면" in resp.text
 
 
 def test_quick_score_then_recommendations_with_rank(client, library):
     resp = client.post("/reviews/1", data={"score": "10", "toggle": "score"}, headers=HX)
     assert resp.status_code == 200
-    assert "<b>10점</b>" in resp.text and "<html" not in resp.text  # 위젯 조각만
+    assert '<span class="stars__value">5</span>' in resp.text  # 10점 = 별 5개
+    assert resp.text.count("stars__half--l is-on") == 5 and "<html" not in resp.text  # 위젯 조각만
 
     page = client.get("/").text
     assert "검황 회귀전" in page
-    assert '<span class="rank">1</span>' in page
+    assert '<span class="card__rank">1</span>' in page
 
 
 def test_score_and_status_can_be_set_together(client, library):
@@ -73,7 +74,11 @@ def test_full_form_saves_aspects_and_blanks(client, library):
         "aspect_immersion": "", "memo": "작화가 아쉽다",
     }  # fmt: skip
     resp = client.post("/reviews/3", data=form, headers=HX)
-    assert "7.5점" in resp.text and "보는 중" in resp.text and "42화까지" in resp.text
+    assert "세부 평균 3.8" in resp.text and "42화까지 봄" in resp.text
+    assert (
+        'is-on" type="button" aria-pressed="true" hx-post="/reviews/3" hx-vals=\'{"status": "watching"'
+        in resp.text
+    )
     r = review(library, 3)
     assert r.score is None and r.aspects == {"story": 9, "art": 6} and r.episodes_read == 42
     assert "<form" in client.get("/reviews/3/edit").text
@@ -113,7 +118,7 @@ def test_public_pages_are_read_only(library):
         for path in ("/comics", "/comic/5", "/users", "/users/singun11", "/healthz"):
             assert c.get(path, follow_redirects=False).status_code == 200, path
         page = c.get("/users/singun11").text
-        assert "계약 결혼의 공작님" in page and "9점" in page
+        assert "계약 결혼의 공작님" in page and '<span class="stars__value">4.5</span>' in page
         assert "비밀 메모" not in page  # 메모는 본인만
         assert 'hx-post="/reviews/' not in page  # 평가 버튼 없음
         assert c.get("/users/nobody").status_code == 404
@@ -207,7 +212,7 @@ def test_infinite_scroll_returns_fragment(client, library):
     first = client.get("/").text
     assert 'hx-trigger="revealed"' in first and "page=1" in first
     more = client.get("/", params={"page": "1"}, headers=HX).text
-    assert "<html" not in more and '<span class="rank">31</span>' in more
+    assert "<html" not in more and '<span class="card__rank">31</span>' in more
     comics_more = client.get("/comics", params={"page": "1"}, headers=HX).text
     assert "<html" not in comics_more and "card" in comics_more
 
@@ -243,3 +248,18 @@ def test_naver_search_link_on_rate(client):
 )
 def test_parse_product_no(text, expected):
     assert parse_product_no(text) == expected
+
+
+def test_half_star_scores_and_styleguide(client):
+    resp = client.post("/reviews/1", data={"score": "7", "toggle": "score"}, headers=HX)
+    assert '<span class="stars__value">3.5</span>' in resp.text  # 7점 = 별 3.5개
+    assert resp.text.count(' is-on"') >= 7  # 반 개 7칸이 켜짐
+    resp = client.post("/reviews/1", data={"score": "0", "toggle": "score"}, headers=HX)
+    assert "stars__zero is-on" in resp.text  # 0점(별 0개)도 따로 줄 수 있다
+    page = client.get("/ui").text
+    assert "UI 컴포넌트" in page and "stars__track" in page
+
+
+def test_static_assets_are_versioned(client):
+    page = client.get("/comics").text
+    assert "/static/style.css?v=" in page and "/static/htmx.min.js?v=" in page

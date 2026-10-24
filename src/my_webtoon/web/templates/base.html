@@ -5,36 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>{% block title %}my-webtoon{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/htmx.min.js" defer></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  {#- ?v= 는 파일 내용 해시. CSS 를 바꾸면 주소가 바뀌어 브라우저 캐시가 옛 스타일을 쓰지 않는다. #}
+  <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
+  <script src="/static/htmx.min.js?v={{ static_version }}" defer></script>
 </head>
 <body>
   {%- set path = request.url.path %}
-  <header class="top">
-    <a class="brand" href="{{ '/' if authed else '/comics' }}">my-webtoon</a>
-    <nav>
-      {%- if authed %}
-      <a href="/" class="{{ 'on' if path == '/' }}">추천</a>
-      <a href="/rate" class="{{ 'on' if path == '/rate' }}">평가하기</a>
-      {%- endif %}
-      <a href="/comics" class="{{ 'on' if path == '/comics' }}">작품 목록</a>
-      <a href="{{ '/users/' ~ user.username if user else '/users' }}" class="{{ 'on' if path.startswith('/users') }}">평가 기록</a>
-      {%- if authed %}
-      <a href="/crawl" class="{{ 'on' if path == '/crawl' }}">수집</a>
-      <a href="/settings" class="{{ 'on' if path == '/settings' }}">설정</a>
-      {%- if can_logout %}
-      <form method="post" action="/logout" class="inline"><button class="link" title="로그아웃">{{ user.username }} · 로그아웃</button></form>
-      {%- endif %}
-      {%- else %}
-      <a href="/login" class="{{ 'on' if path == '/login' }}">로그인</a>
-      {%- endif %}
-    </nav>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="{{ '/' if authed else '/comics' }}">my-webtoon</a>
+      <nav class="nav">
+        {%- if authed %}
+        <a href="/" class="{{ 'is-on' if path == '/' }}">추천</a>
+        <a href="/rate" class="{{ 'is-on' if path == '/rate' }}">평가하기</a>
+        {%- endif %}
+        <a href="/comics" class="{{ 'is-on' if path == '/comics' or path.startswith('/comic/') }}">작품</a>
+        <a href="{{ '/users/' ~ user.username if user else '/users' }}" class="{{ 'is-on' if path.startswith('/users') }}">평가 기록</a>
+        {%- if authed %}
+        <a href="/crawl" class="{{ 'is-on' if path == '/crawl' }}">수집</a>
+        <a href="/settings" class="{{ 'is-on' if path == '/settings' }}">설정</a>
+        {%- endif %}
+      </nav>
+      <div class="topbar__user">
+        {%- if authed and can_logout %}
+        <span>{{ user.username }}</span>
+        <form method="post" action="/logout" class="inline"><button class="btn btn--ghost btn--sm">로그아웃</button></form>
+        {%- elif not authed %}
+        <a class="btn btn--secondary btn--sm" href="/login">로그인</a>
+        {%- endif %}
+      </div>
+    </div>
   </header>
   <main>
     {% block content %}{% endblock %}
   </main>
   <footer>
-    데이터 출처: <a href="https://series.naver.com/comic/home.series" target="_blank" rel="noopener">네이버 시리즈</a> · 개인 학습용 추천기
+    데이터 출처 <a href="https://series.naver.com/comic/home.series" target="_blank" rel="noopener">네이버 시리즈</a> · 개인 학습용 추천기 · <a href="/ui">UI 컴포넌트</a>
   </footer>
 </body>
 </html>

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% from "_card.html" import card with context %}
+{% block title %}UI 컴포넌트 · my-webtoon{% endblock %}
+{% block content %}
+{{ ui.page_header('UI 컴포넌트', 'templates/_ui.html 매크로 + static/style.css. 화면은 이것만 조합해서 만든다.') }}
+
+<section class="panel ui-section">
+  <h2>색 토큰</h2>
+  <div class="ui-row">
+    {% for name in ['bg', 'surface', 'surface-2', 'text', 'text-2', 'text-3', 'line', 'accent', 'accent-soft', 'star', 'warn', 'promo'] %}
+    <div class="ui-swatch small"><i style="background: var(--{{ name }})"></i>--{{ name }}</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel ui-section">
+  <h2>button · icon_button</h2>
+  <div class="ui-row">
+    {{ ui.button('primary', 'primary', type='button') }}{{ ui.button('secondary', type='button') }}{{ ui.button('ghost', 'ghost', type='button') }}{{ ui.button('danger', 'danger', type='button') }}
+    {{ ui.button('small', 'primary', 'sm', type='button') }}{{ ui.button('아이콘', 'secondary', icon_name='external', type='button') }}{{ ui.icon_button('edit', '편집') }}
+  </div>
+</section>
+
+<section class="panel ui-section">
+  <h2>badge · chip</h2>
+  <div class="ui-row">
+    {{ ui.badge('neutral') }}{{ ui.badge('120화 무료', 'accent') }}{{ ui.badge('전화 무료', 'solid') }}{{ ui.badge('3화 무료', 'warn') }}{{ ui.badge('33화 무료 50일 남음', 'promo', icon_name='clock') }}{{ ui.badge('9.9', icon_name='star') }}
+  </div>
+  <div class="ui-row mt-3">{{ ui.chip('봤음', true) }}{{ ui.chip('보는 중') }}{{ ui.chip('하차') }}</div>
+</section>
+
+<section class="panel ui-section">
+  <h2>stars · star_input</h2>
+  <div class="ui-row">{% for s in [0, 1, 5, 7, 10] %}{{ ui.stars(s) }}{% endfor %}</div>
+  <div class="ui-row mt-3">{{ ui.stars(9, 'sm') }}<span class="muted small">별 반 개 = 1점, 다섯 개 = 10점. 입력은 반 개씩, 같은 값을 다시 누르면 지움.</span></div>
+</section>
+
+<section class="panel ui-section">
+  <h2>field · input · select · tabs</h2>
+  <div class="form-grid">
+    {% call ui.field('입력', '도움말') %}<input class="input" placeholder="텍스트">{% endcall %}
+    {% call ui.field('셀렉트') %}{{ ui.select('x', [('a', '가'), ('b', '나')], 'a') }}{% endcall %}
+    <span class="input-icon">{{ ui.icon('search') }}<input class="input" placeholder="검색"></span>
+  </div>
+  <div class="mt-3">{{ ui.tabs([('#', '전체', none, true), ('#', '봤음', 12, false), ('#', '보는 중', 3, false)], '예시') }}</div>
+</section>
+
+<section class="ui-section">
+  <h2>card</h2>
+  {% if sample %}<div class="grid">{{ card(sample, none, editable=false) }}</div>{% else %}{{ ui.empty('작품이 없어 카드 예시를 못 보여요.') }}{% endif %}
+</section>
+{% endblock %}

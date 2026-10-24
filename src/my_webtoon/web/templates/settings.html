@@ -1,60 +1,57 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}설정 · my-webtoon{% endblock %}
 {% block content %}
-<h1>설정 <small>{{ user.username }}{% if user.is_admin %} · 관리자{% endif %}</small></h1>
-{% if msg %}<p class="notice ok">{{ msg }}</p>{% endif %}
-{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+{{ ui.page_header('설정', user.username ~ (' · 관리자' if user.is_admin else '')) }}
+{% if msg %}<p class="alert alert--ok">{{ msg }}</p>{% endif %}
+{% if error %}<p class="alert alert--error">{{ error }}</p>{% endif %}
 
 <section class="panel">
   <h2>비밀번호 바꾸기</h2>
-  <form method="post" action="/settings/password" class="stack">
-    {% if has_password %}<input type="password" name="current" placeholder="지금 비밀번호" required autocomplete="current-password">{% endif %}
-    <input type="password" name="new" placeholder="새 비밀번호 (8자 이상)" required minlength="8" autocomplete="new-password">
-    <input type="password" name="confirm" placeholder="새 비밀번호 한 번 더" required minlength="8" autocomplete="new-password">
-    <button class="btn">바꾸기</button>
+  <p class="panel__desc">바꾸면 다른 기기의 로그인은 모두 풀려요. 해시만 저장하고 평문은 남기지 않아요.</p>
+  <form class="stack" method="post" action="/settings/password">
+    {% if has_password %}{% call ui.field('지금 비밀번호') %}<input class="input" type="password" name="current" required autocomplete="current-password">{% endcall %}{% endif %}
+    {% call ui.field('새 비밀번호', '8자 이상') %}<input class="input" type="password" name="new" required minlength="8" autocomplete="new-password">{% endcall %}
+    {% call ui.field('새 비밀번호 확인') %}<input class="input" type="password" name="confirm" required minlength="8" autocomplete="new-password">{% endcall %}
+    <div>{{ ui.button('바꾸기', 'primary') }}</div>
   </form>
-  <p class="muted small">
-    바꾸면 다른 기기의 로그인은 모두 풀려요. 해시만 저장하고 평문은 남기지 않아요.
-  </p>
 </section>
 
 <section class="panel">
-  <h2>내 평가 내보내기 / 가져오기</h2>
-  <p>내 평가 {{ review_count }}개 · 직접 보관하거나 다른 곳에서 쓰던 기록을 옮길 때 써요. 자동 백업 파일을 넣으면 내 몫만 가져와요.</p>
-  <p><a class="btn" href="/settings/export.json">JSON 으로 내려받기</a></p>
-  <form method="post" action="/settings/import" enctype="multipart/form-data" class="inline-form">
-    <input type="file" name="file" accept="application/json" required>
-    <button class="btn">가져오기</button>
+  <h2>내 평가 내보내기 · 가져오기</h2>
+  <p class="panel__desc">내 평가 {{ review_count }}개. 직접 보관하거나 다른 곳에서 쓰던 기록을 옮길 때 써요. 자동 백업 파일을 넣으면 내 몫만 가져와요.</p>
+  <div class="row mb-4">{{ ui.button('JSON 내려받기', 'secondary', href='/settings/export.json') }}</div>
+  <form class="row" method="post" action="/settings/import" enctype="multipart/form-data">
+    <input class="input" type="file" name="file" accept="application/json" required style="max-width: 320px; padding-top: 7px">
+    {{ ui.button('가져오기', 'primary') }}
   </form>
-  <p class="muted small">같은 작품은 파일 내용으로 덮어써요. 아직 수집 안 된 작품은 수집 대기열에 넣어요.</p>
 </section>
 
 {% if user.is_admin %}
 <section class="panel">
   <h2>사용자</h2>
-  <ul class="user-list">
+  <p class="panel__desc">공개 가입은 없어요. 여기서 추가한 사람은 로그인한 뒤 자기 비밀번호를 바꾸면 돼요.</p>
+  <ul class="list mb-4">
     {% for u, count in users %}
-    <li><a href="/users/{{ u.username }}"><b>{{ u.username }}</b></a>
-        <span class="muted">{{ '관리자 · ' if u.is_admin }}평가 {{ count }}개 · {{ u.created_at[:10] }}</span></li>
+    <li><a href="/users/{{ u.username }}">{{ u.username }}</a>
+        <span class="muted small">{{ '관리자 · ' if u.is_admin }}평가 {{ count }}개 · {{ u.created_at[:10] }}</span></li>
     {% endfor %}
   </ul>
-  <form method="post" action="/settings/users" class="inline-form">
-    <input name="username" placeholder="아이디 (영문 소문자·숫자 3~32자)" required pattern="[a-z0-9_\-]{3,32}" autocapitalize="none">
-    <input type="password" name="password" placeholder="처음 비밀번호 (8자 이상)" required minlength="8" autocomplete="new-password">
+  <form class="form-grid" method="post" action="/settings/users">
+    {% call ui.field('아이디', '영문 소문자·숫자·-·_ 3~32자') %}<input class="input" name="username" required pattern="[a-z0-9_\-]{3,32}" autocapitalize="none">{% endcall %}
+    {% call ui.field('처음 비밀번호', '8자 이상') %}<input class="input" type="password" name="password" required minlength="8" autocomplete="new-password">{% endcall %}
     <label class="check"><input type="checkbox" name="is_admin" value="1"> 관리자</label>
-    <button class="btn">추가</button>
+    <div>{{ ui.button('사용자 추가', 'primary') }}</div>
   </form>
-  <p class="muted small">새 사용자는 로그인한 뒤 이 화면에서 자기 비밀번호를 바꾸면 돼요. 공개 가입은 없어요.</p>
 </section>
 
 <section class="panel">
   <h2>자동 백업</h2>
   {% if backup_dir %}
-  <p>하루 한 번 <code>{{ backup_dir }}</code> 에 DB 전체와 평가 JSON 을 저장해요 (최근 14개 보관).
-     마지막 백업: {{ (last_backup_at or '아직')[:16] }}</p>
-  <form method="post" action="/settings/backup"><button class="btn">지금 백업</button></form>
+  <p class="panel__desc">하루 한 번 <code>{{ backup_dir }}</code>(Mac NFS)에 DB 전체와 사용자별 평가 JSON 을 저장해요. 최근 14개 보관 · 마지막 {{ (last_backup_at or '아직')[:16] | replace('T', ' ') }}</p>
+  <form method="post" action="/settings/backup">{{ ui.button('지금 백업', 'secondary') }}</form>
   {% else %}
-  <p class="muted">BACKUP_DIR 이 설정돼 있지 않아 자동 백업이 꺼져 있어요.</p>
+  <p class="panel__desc">BACKUP_DIR 이 설정돼 있지 않아 자동 백업이 꺼져 있어요.</p>
   {% endif %}
 </section>
 {% endif %}

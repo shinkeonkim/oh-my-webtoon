@@ -23,6 +23,7 @@ HTMX 로 부분 교체한다 — 프론트엔드 빌드 도구 없이 파이썬 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -48,16 +49,16 @@ from . import auth
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
 ALWAYS_PUBLIC = ("/login", "/static", "/healthz")
-PUBLIC_GET = ("/comics", "/comic/", "/users")  # 읽기 전용 공개 화면
+PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui")  # 읽기 전용 공개 화면
 PER_PAGE = 30
-SCORE_FILTERS = {  # /users/{name}?score=...  (세부 점수만 있으면 그 평균을 반올림해서 본다)
-    "10": ("10점", lambda s: s is not None and round(s) == 10),
-    "9": ("9점", lambda s: s is not None and round(s) == 9),
-    "8": ("8점", lambda s: s is not None and round(s) == 8),
-    "7": ("7점", lambda s: s is not None and round(s) == 7),
-    "6": ("6점", lambda s: s is not None and round(s) == 6),
-    "low": ("5점 이하", lambda s: s is not None and round(s) <= 5),
-    "none": ("점수 없음", lambda s: s is None),
+SCORE_FILTERS = {  # /users/{name}?score=...  점수는 0~10(=별 반 개 단위). 세부 점수만 있으면 평균을 반올림.
+    "10": ("★5", lambda s: s is not None and round(s) == 10),
+    "9": ("★4.5", lambda s: s is not None and round(s) == 9),
+    "8": ("★4", lambda s: s is not None and round(s) == 8),
+    "7": ("★3.5", lambda s: s is not None and round(s) == 7),
+    "6": ("★3", lambda s: s is not None and round(s) == 6),
+    "low": ("★2.5 이하", lambda s: s is not None and round(s) <= 5),
+    "none": ("별점 없음", lambda s: s is None),
 }
 
 
@@ -98,11 +99,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(
         free_label=free_label,
+        free_tone=free_tone,
         episodes_label=episodes_label,
         series_link=series_link,
+        format_stars=format_stars,
+        reason_label=reason_label,
+        static_version=static_version(HERE / "static"),
         STATUSES=db.STATUSES,
         ASPECTS=db.ASPECTS,
         SCORES=list(db.SCORE_RANGE),
+    )
+    templates.env.filters.update(
+        star_option=lambda v: (v, f"★{format_stars(v)}"),  # 셀렉트용 (값, 라벨)
+        pair=lambda v: (v, v),
+        sort_option=lambda item: (item[0], item[1][0]),
     )
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 
@@ -503,6 +513,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.session.clear()
         return RedirectResponse("/comics", status_code=303)
 
+    @app.get("/ui", response_class=HTMLResponse)
+    def styleguide(request: Request, conn=Depends(get_conn)):
+        """공통 컴포넌트 모음 (스타일 가이드). 새 화면을 만들 때 여기 있는 것만 쓴다."""
+        comics, _ = db.list_comics(conn, limit=1)
+        return render(request, "ui.html", sample=comics[0] if comics else None)
+
     @app.get("/healthz")
     def healthz():
         return {"ok": True}
@@ -601,6 +617,39 @@ def series_link(request: Request, comic) -> str:
     if re.search(r"iPhone|iPad|Mobile", ua):
         return mobile_url
     return f"https://series.naver.com/{path}"
+
+
+def format_stars(score) -> str:
+    """0~10 점 → 별 개수 문자열. 9 → '4.5', 8 → '4', 7.5(세부 평균) → '3.8'."""
+    if score is None:
+        return ""
+    stars = score / 2
+    return f"{stars:.0f}" if stars == int(stars) else f"{stars:.1f}"
+
+
+def reason_label(token: str) -> str:
+    """추천 이유 토큰을 읽기 좋게: '장르:무협' → '무협', '작가:JP' → '작가 JP', '#회귀' 는 그대로."""
+    kind, _, value = token.partition(":")
+    if not value:
+        return token
+    return {"장르": value, "작가": f"작가 {value}", "출판사": value}.get(kind, value)
+
+
+def free_tone(comic) -> str:
+    """무료 배지 색: 전부 무료 → solid, 3화 이하(유료 위주) → warn, 그 밖 → accent."""
+    if comic.is_all_free:
+        return "solid"
+    if comic.unit == "화" and (comic.free_episodes or 0) <= 3:
+        return "warn"
+    return "accent"
+
+
+def static_version(static_dir: Path) -> str:
+    """정적 파일 내용 해시 앞 8자리. 파일이 바뀌면 URL(?v=)이 바뀌어 브라우저 캐시를 피한다."""
+    digest = hashlib.sha256()
+    for path in sorted(static_dir.iterdir()):
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:8]
 
 
 def free_label(comic) -> str:
