@@ -42,7 +42,7 @@ jobs:
       - name: Bump image tag in deploy/
         run: |
           cd deploy
-          kustomize edit set image "ghcr.io/shinkeonkim/my-webtoon=ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}"
+          kustomize edit set image "ghcr.io/shinkeonkim/oh-my-webtoon=ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "deploy: 이미지를 ${{ steps.tag.outputs.tag }} 로 올린다" || exit 0

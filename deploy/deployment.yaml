@@ -15,6 +15,8 @@ spec:
     metadata:
       labels: *labels
     spec:
+      imagePullSecrets:
+        - name: my-webtoon-ghcr-pull # private ghcr 패키지 (oh-my-homelab helm-charts/secrets/my-webtoon)
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -25,7 +27,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: app
-          image: ghcr.io/shinkeonkim/my-webtoon:latest
+          image: ghcr.io/shinkeonkim/oh-my-webtoon:latest
           ports:
             - name: http
               containerPort: 8000

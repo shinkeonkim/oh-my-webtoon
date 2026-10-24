@@ -13,5 +13,5 @@ labels:
   - pairs:
       app.kubernetes.io/part-of: my-webtoon
 images:
-  - name: ghcr.io/shinkeonkim/my-webtoon
+  - name: ghcr.io/shinkeonkim/oh-my-webtoon
     newTag: latest # release.yml 이 main push 마다 sha-xxxxxxx 로 바꿔 커밋한다
