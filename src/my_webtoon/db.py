@@ -59,6 +59,7 @@ def init_schema(
       v2  reviews(product_no 단일 키)      → reviews(user_id, product_no) — 관리자 계정 소유로
     """
     conn.executescript(_schema_sql())
+    _add_column(conn, "users", "is_demo", "INTEGER NOT NULL DEFAULT 0")
     admin_id = ensure_admin(conn, admin_username, admin_password_hash)
     _migrate_reviews_v2(conn, admin_id)
     _migrate_ratings_v1(conn, admin_id)
@@ -574,6 +575,7 @@ class User:
     is_admin: bool
     session_epoch: int
     created_at: str
+    is_demo: bool = False
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> User:
@@ -584,6 +586,7 @@ class User:
             is_admin=bool(row["is_admin"]),
             session_epoch=row["session_epoch"],
             created_at=row["created_at"],
+            is_demo=bool(row["is_demo"]),
         )
 
 
@@ -657,6 +660,16 @@ def ensure_admin(conn: sqlite3.Connection, username: str, password_hash: str | N
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    """새 칸을 더하는 마이그레이션 (이미 있으면 아무것도 안 한다)."""
+    if column not in _columns(conn, table):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def set_demo(conn: sqlite3.Connection, user_id: int, on: bool) -> None:
+    conn.execute("UPDATE users SET is_demo = ? WHERE id = ?", (int(on), user_id))
 
 
 def _migrate_reviews_v2(conn: sqlite3.Connection, admin_id: int) -> int:

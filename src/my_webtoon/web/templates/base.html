@@ -38,6 +38,9 @@
     </div>
   </header>
   <main>
+    {%- if user and user.is_demo %}
+    <p class="alert alert--info">시연용 계정이에요. 자유롭게 평가해 보세요 — 평가는 매일 밤 처음 상태로 돌아가고, 비밀번호 변경·가져오기는 막혀 있어요.</p>
+    {%- endif %}
     {% block content %}{% endblock %}
   </main>
   <footer>

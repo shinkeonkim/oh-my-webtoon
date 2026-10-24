@@ -9,6 +9,9 @@
   {{ ui.button('검색', 'primary') }}
 </form>
 
+{% if user.is_demo %}
+{% if error %}<p class="alert alert--error">{{ error }}</p>{% endif %}
+{% else %}
 <details class="tuning panel"{{ ' open' if error or (q and not results) }}>
   <summary>{{ ui.icon('chevron', 14) }}목록에 없나요? 네이버 시리즈 링크로 가져오기</summary>
   <form class="toolbar mt-3 m-0" method="post" action="/import">
@@ -23,6 +26,7 @@
   {% endif %}
   {% if error %}<p class="alert alert--error mt-3">{{ error }}</p>{% endif %}
 </details>
+{% endif %}
 
 {% if q %}
   <h2>"{{ q }}" 검색 결과 <span class="muted">{{ results | length }}</span></h2>

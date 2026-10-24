@@ -6,6 +6,7 @@
 {% if msg %}<p class="alert alert--ok">{{ msg }}</p>{% endif %}
 {% if error %}<p class="alert alert--error">{{ error }}</p>{% endif %}
 
+{% if not user.is_demo %}
 <section class="panel">
   <h2>비밀번호 바꾸기</h2>
   <p class="panel__desc">바꾸면 다른 기기의 로그인은 모두 풀려요. 해시만 저장하고 평문은 남기지 않아요.</p>
@@ -16,15 +17,18 @@
     <div>{{ ui.button('바꾸기', 'primary') }}</div>
   </form>
 </section>
+{% endif %}
 
 <section class="panel">
   <h2>내 평가 내보내기 · 가져오기</h2>
   <p class="panel__desc">내 평가 {{ review_count }}개. 직접 보관하거나 다른 곳에서 쓰던 기록을 옮길 때 써요. 자동 백업 파일을 넣으면 내 몫만 가져와요.</p>
   <div class="row mb-4">{{ ui.button('JSON 내려받기', 'secondary', href='/settings/export.json') }}</div>
+  {% if not user.is_demo %}
   <form class="row" method="post" action="/settings/import" enctype="multipart/form-data">
     <input class="input" type="file" name="file" accept="application/json" required style="max-width: 320px; padding-top: 7px">
     {{ ui.button('가져오기', 'primary') }}
   </form>
+  {% endif %}
 </section>
 
 {% if user.is_admin %}
@@ -34,7 +38,7 @@
   <ul class="list mb-4">
     {% for u, count in users %}
     <li><a href="/users/{{ u.username }}">{{ u.username }}</a>
-        <span class="muted small">{{ '관리자 · ' if u.is_admin }}평가 {{ count }}개 · {{ u.created_at[:10] }}</span></li>
+        <span class="muted small">{{ '관리자 · ' if u.is_admin }}{{ '데모 · ' if u.is_demo }}평가 {{ count }}개 · {{ u.created_at[:10] }}</span></li>
     {% endfor %}
   </ul>
   <form class="form-grid" method="post" action="/settings/users">

@@ -216,6 +216,7 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
 .alert { padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: var(--text-sm); margin-bottom: var(--space-4); }
 .alert--ok { background: var(--accent-soft); color: var(--accent-strong); }
 .alert--error { background: var(--warn-soft); color: var(--warn); }
+.alert--info { background: var(--promo-soft); color: var(--promo); }
 
 .empty {
   padding: var(--space-6) var(--space-4); text-align: center; color: var(--text-3); font-size: var(--text-sm);

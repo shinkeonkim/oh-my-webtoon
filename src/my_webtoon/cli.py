@@ -3,6 +3,10 @@
 my-webtoon serve                 웹 서버 (기본 0.0.0.0:8000)
 my-webtoon crawl --limit 500     크롤링 한 번 (로컬에서 데이터를 미리 채울 때)
 my-webtoon import 2140867        작품 하나만 가져오기
+my-webtoon user list             사용자 목록
+my-webtoon user add alice        사용자 추가 (비밀번호는 프롬프트로)
+my-webtoon user set-password singun11              비밀번호 재설정 (잊었을 때 kubectl exec -it 로)
+my-webtoon user demo test --copy-from singun11     시연용 계정 지정 (--off 로 해제, demo.py)
 """
 
 from __future__ import annotations
@@ -38,6 +42,10 @@ def main(argv: list[str] | None = None) -> None:
     add.add_argument("--admin", action="store_true")
     setpw = user_sub.add_parser("set-password")
     setpw.add_argument("username")
+    demo_cmd = user_sub.add_parser("demo")
+    demo_cmd.add_argument("username")
+    demo_cmd.add_argument("--copy-from", help="이 사용자의 평가(메모 제외)를 기준 평가로 복사")
+    demo_cmd.add_argument("--off", action="store_true", help="데모 해제")
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -103,8 +111,11 @@ def _user_command(settings, args) -> None:
     with db.session(settings.database_path) as conn:
         if args.user_command == "list":
             for u, count in db.list_users(conn):
-                role = "관리자" if u.is_admin else "사용자"
+                role = "관리자" if u.is_admin else ("데모" if u.is_demo else "사용자")
                 print(f"{u.id:>3} {u.username:<20} {role}  평가 {count}개")
+            return
+        if args.user_command == "demo":
+            _demo_command(conn, args)
             return
         password = getpass.getpass("새 비밀번호: ")
         if password != getpass.getpass("한 번 더: "):
@@ -119,6 +130,23 @@ def _user_command(settings, args) -> None:
                 raise SystemExit(f"없는 사용자: {args.username}")
             db.set_password_hash(conn, u.id, auth.hash_password(password))
             print(f"{u.username} 의 비밀번호를 바꿨어요 (다른 세션은 끊겨요)")
+
+
+def _demo_command(conn, args) -> None:
+    from . import demo
+
+    target = db.get_user_by_name(conn, args.username)
+    if target is None:
+        raise SystemExit(f"없는 사용자: {args.username}")
+    if args.off:
+        demo.unmake_demo(conn, target)
+        print(f"{target.username} 데모 해제")
+        return
+    source = db.get_user_by_name(conn, args.copy_from) if args.copy_from else None
+    if args.copy_from and source is None:
+        raise SystemExit(f"없는 사용자: {args.copy_from}")
+    n = demo.make_demo(conn, target, source)
+    print(f"{target.username} 을(를) 데모로 지정 — 기준 평가 {n}개, 매일 밤 이 상태로 돌아가요")
 
 
 if __name__ == "__main__":

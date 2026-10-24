@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS users (
     username        TEXT    NOT NULL UNIQUE,
     password_hash   TEXT,                           -- PBKDF2 (web/auth.py). NULL 이면 로그인 불가
     is_admin        INTEGER NOT NULL DEFAULT 0,     -- 사용자 추가·수집 실행·백업
+    is_demo         INTEGER NOT NULL DEFAULT 0,     -- 시연용: 비밀번호 변경·가져오기 막힘, 매일 밤 평가 초기화 (demo.py)
     session_epoch   INTEGER NOT NULL DEFAULT 0,     -- 비밀번호를 바꾸면 +1 → 다른 기기 세션 무효화
     created_at      TEXT    NOT NULL
 );
