@@ -15,4 +15,4 @@ labels:
 images:
 - name: ghcr.io/shinkeonkim/oh-my-webtoon
   newName: ghcr.io/shinkeonkim/oh-my-webtoon
-  newTag: sha-b1f53dd
+  newTag: sha-40c15ef
