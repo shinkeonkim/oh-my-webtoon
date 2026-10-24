@@ -161,6 +161,7 @@ def run_once(
                 result.discovered,
                 result.failed,
                 "; ".join([result.summary(), *result.notes[:5]]),
+                skipped=result.skipped,
             )
     log.info("크롤링 완료: %s", result.summary())
     return result

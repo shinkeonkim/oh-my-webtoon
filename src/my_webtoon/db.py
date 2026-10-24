@@ -60,6 +60,9 @@ def init_schema(
     """
     conn.executescript(_schema_sql())
     _add_column(conn, "users", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    # 몇 개 페이지에서 링크됐는지 — 많이 링크된(인기 있을) 작품부터 수집한다 (next_pending)
+    _add_column(conn, "crawl_queue", "refs", "INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "crawl_runs", "skipped", "INTEGER NOT NULL DEFAULT 0")
     admin_id = ensure_admin(conn, admin_username, admin_password_hash)
     _migrate_reviews_v2(conn, admin_id)
     _migrate_ratings_v1(conn, admin_id)
@@ -91,6 +94,7 @@ class Comic:
     thumbnail_url: str | None
     crawled_at: str
     promo_label: str | None = None  # free_promos 와 조인했을 때만 채워진다
+    free_gain: int = 0  # 최근 RECENT_DAYS 일 동안 무료 회차가 늘어난 만큼 (comic_changes)
 
     @property
     def url(self) -> str:
@@ -118,18 +122,54 @@ class Comic:
             thumbnail_url=row["thumbnail_url"],
             crawled_at=row["crawled_at"],
             promo_label=row["promo_label"] if "promo_label" in keys else None,
+            free_gain=(row["free_gain"] or 0) if "free_gain" in keys else 0,
         )
 
 
-_COMIC_SELECT = """
-    SELECT c.*, p.label AS promo_label
+RECENT_DAYS = 14  # '무료 +N' 배지를 이 기간 동안 붙인다
+
+_COMIC_SELECT = f"""
+    SELECT c.*, p.label AS promo_label, g.free_gain
     FROM comics c
     LEFT JOIN free_promos p ON p.product_no = c.product_no
+    LEFT JOIN (
+        SELECT product_no,
+               SUM(CAST(new_value AS INTEGER) - CAST(COALESCE(old_value, '0') AS INTEGER)) AS free_gain
+        FROM comic_changes
+        WHERE field = 'free_episodes'
+          AND changed_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-{RECENT_DAYS} days')
+        GROUP BY product_no
+    ) g ON g.product_no = c.product_no
 """
 
+# 바뀌면 comic_changes 에 남길 칸. 줄거리·평점처럼 자주 조금씩 바뀌는 건 소식거리가 아니라 뺀다.
+TRACKED_FIELDS = ("free_episodes", "total_episodes", "status", "is_all_free")
 
-def upsert_comic(conn: sqlite3.Connection, data: dict) -> None:
-    """parser.parse_detail() 결과 dict 를 그대로 저장한다."""
+
+def upsert_comic(conn: sqlite3.Connection, data: dict) -> list[str]:
+    """parser.parse_detail() 결과 dict 를 그대로 저장한다.
+
+    이미 있던 작품이면 TRACKED_FIELDS 를 이전 값과 비교해 달라진 것을 comic_changes 에 남긴다
+    (주간 갱신 → '무료가 늘었어요'·'완결됐어요' 소식). 처음 수집한 작품은 기록하지 않는다. 바뀐 칸 이름들을 돌려준다.
+    """
+    old = conn.execute(
+        f"SELECT {', '.join(TRACKED_FIELDS)} FROM comics WHERE product_no = ?",
+        (data["product_no"],),
+    ).fetchone()
+    changed = []
+    if old is not None:
+        ts = data.get("crawled_at") or now_iso()
+        for name in TRACKED_FIELDS:
+            before, after = old[name], data.get(name)
+            if name == "is_all_free":
+                before, after = int(bool(before)), int(bool(after))
+            if after is not None and before != after:
+                changed.append(name)
+                conn.execute(
+                    "INSERT INTO comic_changes (product_no, field, old_value, new_value, changed_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (data["product_no"], name, before, after, ts),
+                )
     conn.execute(
         """
         INSERT INTO comics (
@@ -158,6 +198,7 @@ def upsert_comic(conn: sqlite3.Connection, data: dict) -> None:
             "crawled_at": data.get("crawled_at") or now_iso(),
         },
     )
+    return changed
 
 
 EXCLUDED_GENRE_PREFIX = "제외 장르:"
@@ -165,6 +206,7 @@ EXCLUDED_GENRE_PREFIX = "제외 장르:"
 
 def delete_comic(conn: sqlite3.Connection, product_no: int) -> None:
     conn.execute("DELETE FROM reviews WHERE product_no = ?", (product_no,))
+    conn.execute("DELETE FROM comic_changes WHERE product_no = ?", (product_no,))
     conn.execute("DELETE FROM free_promos WHERE product_no = ?", (product_no,))
     conn.execute("DELETE FROM comics WHERE product_no = ?", (product_no,))
 
@@ -236,12 +278,24 @@ COMIC_SORTS = {
 }
 
 
+FREE_FILTERS = {  # /comics?free=...  (권은 1권 = 8화로 환산 — scoring.VOLUME_TO_EPISODES)
+    "10": "무료 10화 이상",
+    "30": "무료 30화 이상",
+    "100": "무료 100화 이상",
+    "all": "전부 무료",
+}
+STATUS_FILTERS = ("연재중", "완결")
+
+
 def list_comics(
     conn: sqlite3.Connection,
     *,
     query: str = "",
     genre: str = "",
     sort: str = "popular",
+    free: str = "",
+    status: str = "",
+    hide_reviewed_by: int | None = None,
     limit: int = 40,
     offset: int = 0,
 ) -> tuple[list[Comic], int]:
@@ -253,6 +307,20 @@ def list_comics(
     if genre:
         where.append("c.genre = ?")
         params.append(genre)
+    if free == "all":
+        where.append("c.is_all_free = 1")
+    elif free in FREE_FILTERS:
+        where.append(
+            "(c.is_all_free = 1 OR (CASE WHEN c.unit = '권' THEN c.free_episodes * 8"
+            " ELSE c.free_episodes END) >= ?)"
+        )
+        params.append(int(free))
+    if status in STATUS_FILTERS:
+        where.append("c.status = ?")
+        params.append(status)
+    if hide_reviewed_by is not None:
+        where.append("c.product_no NOT IN (SELECT product_no FROM reviews WHERE user_id = ?)")
+        params.append(hide_reviewed_by)
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     order = COMIC_SORTS.get(sort, COMIC_SORTS["popular"])[1]
     total = conn.execute(f"SELECT COUNT(*) FROM comics c{clause}", params).fetchone()[0]
@@ -290,26 +358,38 @@ def stale_product_nos(conn: sqlite3.Connection, older_than_days: int, limit: int
 
 
 def enqueue(conn: sqlite3.Connection, product_nos: Iterable[int], source: int | None) -> int:
-    """처음 보는 productNo 만 pending 으로 넣는다. 새로 넣은 개수를 돌려준다."""
+    """처음 보는 productNo 는 pending 으로 넣고, 이미 있으면 '링크된 횟수(refs)'만 올린다.
+    새로 넣은 개수를 돌려준다."""
+    nos = set(product_nos)
+    if not nos:
+        return 0
+    marks = ",".join("?" * len(nos))
+    known = {
+        r[0]
+        for r in conn.execute(
+            f"SELECT product_no FROM crawl_queue WHERE product_no IN ({marks})", list(nos)
+        )
+    }
     ts = now_iso()
-    before = conn.total_changes
     conn.executemany(
         """
-        INSERT INTO crawl_queue (product_no, discovered_from, discovered_at, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(product_no) DO NOTHING
+        INSERT INTO crawl_queue (product_no, discovered_from, discovered_at, updated_at, refs)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(product_no) DO UPDATE SET refs = refs + excluded.refs
         """,
-        [(no, source, ts, ts) for no in set(product_nos)],
+        [(no, source, ts, ts, int(source is not None)) for no in nos],
     )
-    return conn.total_changes - before
+    return len(nos - known)
 
 
 def next_pending(conn: sqlite3.Connection, limit: int) -> list[int]:
+    """다음에 수집할 작품. 시드(TOP100·무료관)에서 온 것 먼저, 그다음 여러 페이지에서 링크된 순.
+    많이 링크된 작품 = 연관작·인기작 목록에 자주 뜨는 작품이라, 먼저 모으면 쓸모 있는 데이터가 빨리 쌓인다."""
     rows = conn.execute(
         """
         SELECT product_no FROM crawl_queue
         WHERE state = 'pending' OR (state = 'failed' AND attempts < 3)
-        ORDER BY discovered_from IS NOT NULL, discovered_at
+        ORDER BY discovered_from IS NOT NULL, refs DESC, discovered_at
         LIMIT ?
         """,
         (limit,),
@@ -331,9 +411,21 @@ def mark_crawled(
 
 
 def replace_promos(conn: sqlite3.Connection, promos: dict[int, str]) -> None:
-    """무료관 이벤트는 매번 통째로 바뀌므로 지우고 다시 넣는다."""
-    conn.execute("DELETE FROM free_promos")
+    """무료관 이벤트는 매번 통째로 바뀌므로 지우고 다시 넣는다.
+    새로 이벤트에 걸린 작품은 comic_changes 에 'promo' 로 남긴다 ('N일 남음'은 매일 바뀌니 걸림/안 걸림만 본다)."""
+    before = {r[0] for r in conn.execute("SELECT product_no FROM free_promos")}
     ts = now_iso()
+    known = {r[0] for r in conn.execute("SELECT product_no FROM comics")}
+    for no, label in promos.items():
+        if (
+            no not in before and no in known and before
+        ):  # 첫 수집(before 가 비었을 때)은 소식이 아니다
+            conn.execute(
+                "INSERT INTO comic_changes (product_no, field, old_value, new_value, changed_at)"
+                " VALUES (?, 'promo', NULL, ?, ?)",
+                (no, label, ts),
+            )
+    conn.execute("DELETE FROM free_promos")
     conn.executemany(
         "INSERT INTO free_promos (product_no, label, seen_at) VALUES (?, ?, ?)",
         [(no, label, ts) for no, label in promos.items()],
@@ -358,15 +450,54 @@ def start_run(conn: sqlite3.Connection) -> int:
 
 
 def finish_run(
-    conn: sqlite3.Connection, run_id: int, fetched: int, discovered: int, failed: int, note: str
+    conn: sqlite3.Connection,
+    run_id: int,
+    fetched: int,
+    discovered: int,
+    failed: int,
+    note: str,
+    skipped: int = 0,
 ) -> None:
     conn.execute(
         """
-        UPDATE crawl_runs SET finished_at=?, fetched=?, discovered=?, failed=?, note=?
+        UPDATE crawl_runs SET finished_at=?, fetched=?, discovered=?, failed=?, note=?, skipped=?
         WHERE id=?
         """,
-        (now_iso(), fetched, discovered, failed, note, run_id),
+        (now_iso(), fetched, discovered, failed, note, skipped, run_id),
     )
+
+
+def recent_changes(
+    conn: sqlite3.Connection, days: int = 30, fields: tuple[str, ...] | None = None
+) -> list[tuple[sqlite3.Row, Comic]]:
+    """최근 바뀐 기록 (바뀐 내용, 작품) — 새것부터. 소식 화면용."""
+    since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
+    sql = "SELECT * FROM comic_changes WHERE changed_at >= ?"
+    params: list = [since]
+    if fields:
+        sql += f" AND field IN ({','.join('?' * len(fields))})"
+        params += list(fields)
+    changes = conn.execute(sql + " ORDER BY changed_at DESC, id DESC", params).fetchall()
+    comics = comics_by_ids(conn, {ch["product_no"] for ch in changes})
+    return [(ch, comics[ch["product_no"]]) for ch in changes if ch["product_no"] in comics]
+
+
+def comics_by_ids(conn: sqlite3.Connection, product_nos: Iterable[int]) -> dict[int, Comic]:
+    nos = list(set(product_nos))
+    if not nos:
+        return {}
+    rows = conn.execute(
+        _COMIC_SELECT + f" WHERE c.product_no IN ({','.join('?' * len(nos))})", nos
+    ).fetchall()
+    return {r["product_no"]: Comic.from_row(r) for r in rows}
+
+
+def promo_comics(conn: sqlite3.Connection) -> list[Comic]:
+    """지금 무료관에 걸린 기간 한정 무료 작품들."""
+    rows = conn.execute(
+        _COMIC_SELECT + " WHERE p.label IS NOT NULL ORDER BY c.popularity DESC NULLS LAST"
+    ).fetchall()
+    return [Comic.from_row(r) for r in rows]
 
 
 def last_run_started_at(conn: sqlite3.Connection) -> str | None:
@@ -563,6 +694,24 @@ def reviews_with_comics(conn: sqlite3.Connection, user_id: int) -> list[tuple[Re
         )
         for r in rows
     ]
+
+
+def quick_skips(conn: sqlite3.Connection, user_id: int) -> set[int]:
+    """빠른 평가에서 '안 봤음'으로 넘긴 작품들."""
+    rows = conn.execute("SELECT product_no FROM quick_skips WHERE user_id = ?", (user_id,))
+    return {r[0] for r in rows}
+
+
+def set_quick_skip(conn: sqlite3.Connection, user_id: int, product_no: int, on: bool) -> None:
+    if on:
+        conn.execute(
+            "INSERT OR IGNORE INTO quick_skips (user_id, product_no, skipped_at) VALUES (?, ?, ?)",
+            (user_id, product_no, now_iso()),
+        )
+    else:
+        conn.execute(
+            "DELETE FROM quick_skips WHERE user_id = ? AND product_no = ?", (user_id, product_no)
+        )
 
 
 # ---------------------------------------------------------------------------

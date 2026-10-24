@@ -2,7 +2,7 @@
 {% import "_ui.html" as ui %}
 {% block title %}수집 · my-webtoon{% endblock %}
 {% block content %}
-{% call ui.page_header('데이터 수집', '네이버 시리즈 작품 정보 · 모든 사용자가 함께 써요') %}
+{% call ui.page_header('수집·운영', '네이버 시리즈 작품 정보 · 모든 사용자가 함께 써요') %}
   {% if running %}{{ ui.badge('수집 중', 'accent') }}
   {% elif user.is_admin %}<form method="post" action="/crawl/run">{{ ui.button('지금 수집', 'primary') }}</form>{% endif %}
 {% endcall %}
@@ -25,15 +25,33 @@
     시드 갱신 {{ seeds_at | kst('%Y-%m-%d %H:%M') if seeds_at else '아직' }}. 시각은 모두 한국 시간.
   </p>
   <table class="table">
-    <thead><tr><th>#</th><th>시작</th><th class="hide-sm">끝</th><th>수집</th><th>신규</th><th>실패</th><th class="hide-sm">메모</th></tr></thead>
+    <thead><tr><th>#</th><th>시작</th><th class="hide-sm">끝</th><th>수집</th><th>신규</th><th>건너뜀</th><th>실패율</th><th class="hide-sm">메모</th></tr></thead>
     <tbody>
     {% for r in runs %}
+      {%- set tried = r.fetched + r.failed + (r.skipped or 0) %}
       <tr><td>{{ r.id }}</td><td>{{ r.started_at | kst }}</td><td class="hide-sm">{{ r.finished_at | kst if r.finished_at else ('진행 중' if loop.first and running else '중단됨') }}</td>
-          <td>{{ r.fetched }}</td><td>{{ r.discovered }}</td><td>{{ r.failed }}</td><td class="note hide-sm">{{ r.note or '' }}</td></tr>
+          <td>{{ r.fetched }}</td><td>{{ r.discovered }}</td><td>{{ r.skipped or 0 }}</td>
+          <td class="{{ 'warn' if tried and r.failed / tried > 0.05 }}">{{ '%.1f%%' % (100 * r.failed / tried) if tried else '–' }}</td><td class="note hide-sm">{{ r.note or '' }}</td></tr>
     {% else %}
-      <tr><td colspan="7" class="muted">아직 실행 기록이 없어요.</td></tr>
+      <tr><td colspan="8" class="muted">아직 실행 기록이 없어요.</td></tr>
     {% endfor %}
     </tbody>
   </table>
+</section>
+
+<section class="panel">
+  <h2>응답 시간</h2>
+  <p class="panel__desc">이 파드가 {{ timing_since | kst }}부터 받은 최근 요청 {{ timing_count }}개 (최대 2000개, 프로브·정적 파일 제외). p95 가 느린 화면부터. 파드가 바뀌면 처음부터 다시 세요.</p>
+  {% if timings %}
+  <table class="table">
+    <thead><tr><th>경로</th><th>요청</th><th>p50</th><th>p95</th><th class="hide-sm">최대</th><th>5xx</th></tr></thead>
+    <tbody>
+    {% for t in timings %}
+      <tr><td><code>{{ t.route }}</code></td><td>{{ t.count }}</td><td>{{ '%.0f' % t.p50 }}ms</td>
+          <td class="{{ 'warn' if t.p95 > 1000 }}">{{ '%.0f' % t.p95 }}ms</td><td class="hide-sm">{{ '%.0f' % t.max }}ms</td><td class="{{ 'warn' if t.errors }}">{{ t.errors }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted small">아직 기록된 요청이 없어요.</p>{% endif %}
 </section>
 {% endblock %}

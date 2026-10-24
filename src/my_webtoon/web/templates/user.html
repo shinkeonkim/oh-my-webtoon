@@ -4,6 +4,8 @@
 {% block title %}{{ owner.username }} 의 평가 · my-webtoon{% endblock %}
 {% block content %}
 {{ ui.page_header(owner.username ~ ' 의 평가', total ~ '개 중 ' ~ (items | length) ~ '개' ~ ('' if is_owner else ' · 읽기 전용')) }}
+{{ ui.tabs([('/users/' ~ owner.username, '평가 기록', total, true), ('/users/' ~ owner.username ~ '/taste', '취향', none, false)], '보기') }}
+<div class="mb-4"></div>
 {%- macro qs(status_v, score_v) -%}
 /users/{{ owner.username }}?{{ 'status=' ~ status_v if status_v }}{{ '&' if status_v and score_v }}{{ 'score=' ~ score_v if score_v }}
 {%- endmacro %}

@@ -7,6 +7,9 @@ my-webtoon user list             사용자 목록
 my-webtoon user add alice        사용자 추가 (비밀번호는 프롬프트로)
 my-webtoon user set-password singun11              비밀번호 재설정 (잊었을 때 kubectl exec -it 로)
 my-webtoon user demo test --copy-from singun11     시연용 계정 지정 (--off 로 해제, demo.py)
+my-webtoon backup now           지금 백업하고 바로 검사 (BACKUP_DIR 필요)
+my-webtoon backup verify FILE    백업 파일 검사 (깨졌는지, 행 수) — 복구 연습 때 (docs/04)
+my-webtoon eval singun11         추천 품질 측정 (설정별 leave-one-out 비교, recommender/evaluate.py)
 """
 
 from __future__ import annotations
@@ -46,6 +49,15 @@ def main(argv: list[str] | None = None) -> None:
     demo_cmd.add_argument("username")
     demo_cmd.add_argument("--copy-from", help="이 사용자의 평가(메모 제외)를 기준 평가로 복사")
     demo_cmd.add_argument("--off", action="store_true", help="데모 해제")
+
+    bk = sub.add_parser("backup", help="백업 검사")
+    bk_sub = bk.add_subparsers(dest="backup_command", required=True)
+    bk_sub.add_parser("now")
+    bk_verify = bk_sub.add_parser("verify")
+    bk_verify.add_argument("file")
+
+    ev = sub.add_parser("eval", help="추천 품질 측정 (설정별 비교)")
+    ev.add_argument("username")
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -95,6 +107,31 @@ def main(argv: list[str] | None = None) -> None:
         )
     elif args.command == "user":
         _user_command(settings, args)
+    elif args.command == "backup":
+        import json
+        from pathlib import Path
+
+        from . import backup
+
+        if args.backup_command == "now":
+            if not settings.backup_dir:
+                raise SystemExit("BACKUP_DIR 이 설정돼 있지 않아요")
+            check = backup.backup_and_verify(settings.database_path, settings.backup_dir)
+        else:
+            with db.session(settings.database_path) as conn:
+                check = backup.verify_backup(Path(args.file), conn)
+        print(json.dumps(check, ensure_ascii=False, indent=2))
+        if not check["ok"]:
+            raise SystemExit(1)
+    elif args.command == "eval":
+        from .recommender import evaluate
+
+        with db.session(settings.database_path) as conn:
+            u = db.get_user_by_name(conn, args.username)
+            if u is None:
+                raise SystemExit(f"없는 사용자: {args.username}")
+            for result in evaluate.run_all(conn, u.id):
+                print(result.row())
 
 
 def _initial_admin_hash(settings) -> str | None:

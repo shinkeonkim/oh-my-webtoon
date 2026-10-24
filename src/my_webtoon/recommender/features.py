@@ -27,8 +27,9 @@ from sklearn.preprocessing import normalize
 
 from ..db import Comic
 
-DEFAULT_TEXT_WEIGHT = 0.5
-DEFAULT_META_WEIGHT = 0.5
+# 텍스트 0.7 : 메타 0.3 — `my-webtoon eval` 로 0.5:0.5 / 0.3:0.7 등과 비교해 골랐다 (docs/03)
+DEFAULT_TEXT_WEIGHT = 0.7
+DEFAULT_META_WEIGHT = 0.3
 
 
 def text_of(comic: Comic) -> str:

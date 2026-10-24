@@ -20,10 +20,12 @@
     {%- if review.status_label %}{{ ui.badge(review.status_label, 'accent') }}{% endif %}
   </div>
   {%- endif %}
+  {%- set progress = reading_progress(review, comic) %}
   {%- if review and (review.aspects or review.episodes_read is not none or (show_memo and review.memo) or (review.score is none and review.aspects)) %}
   <p class="review__meta">
     {%- if review.score is none and review.aspects %}<span>세부 평균 {{ '%.1f' % (review.overall / 2) }}</span>{% endif %}
-    {%- if review.episodes_read is not none %}<span>{{ review.episodes_read }}{{ comic.unit }}까지 봄</span>{% endif %}
+    {%- if progress %}<span>{{ progress.read }}{{ comic.unit }}까지 봄 · {{ progress.left }}{{ comic.unit }} 남음{% if progress.left %} (무료 {{ progress.free_left }}{{ comic.unit }}){% endif %}</span>
+    {%- elif review.episodes_read is not none %}<span>{{ review.episodes_read }}{{ comic.unit }}까지 봄</span>{% endif %}
     {%- for key, value in review.aspects.items() %}<span>{{ ASPECTS[key] }} {{ format_stars(value) }}</span>{% endfor %}
     {%- if show_memo and review.memo %}<span class="memo">“{{ review.memo }}”</span>{% endif %}
   </p>

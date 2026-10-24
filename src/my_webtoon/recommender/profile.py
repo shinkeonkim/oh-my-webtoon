@@ -16,9 +16,20 @@
 4점을 0으로 둔 이유: 10점 척도에서 5점은 "그럭저럭 볼 만했다"는 약한 긍정이라서.
 '보고 싶음'이 '봤음'보다 큰 이유: 아직 안 본 작품을 일부러 찍어 둔 건 취향을 꽤 직접 드러내니까.
 점수와 상태를 둘 다 남겼다면 점수가 이긴다 (예: 하차했지만 6점 → +0.8).
+
+그 위에 세 가지 조정 (ProfileOptions, 기본값은 `my-webtoon eval` 로 비교해 골랐다 — docs/03):
+  like_power     긍정 가중치를 거듭제곱한다. 1.5 면 10점(2.4→3.7)이 7점(1.2→1.3)보다 훨씬 세다.
+                 "인생작"과 "볼 만했다"가 같은 간격으로 취향을 끌지 않게.
+  negative_scale 부정 가중치에 곱한다. 0.5 면 하차·낮은 점수가 반만 끌어내린다 — 하차는 "이 작품이
+                 별로"일 뿐 그 장르 전체가 싫다는 뜻은 아닐 때가 많다.
+  half_life_days 오래된 평가일수록 약하게: 이 일수마다 반으로 (단 recency_floor 아래로는 안 내려감).
+                 취향은 바뀌니까. 0 이면 끈다.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -36,20 +47,44 @@ SCORE_PIVOT = 4  # 이 점수가 가중치 0
 SCORE_SLOPE = 0.4
 
 
-def review_weight(review: Review) -> float:
+@dataclass(frozen=True)
+class ProfileOptions:
+    like_power: float = 1.5
+    negative_scale: float = 0.5
+    half_life_days: float = 365
+    recency_floor: float = 0.5
+
+
+def base_weight(review: Review) -> float:
+    """점수(또는 상태)만으로 정한 가중치 — 위 표 그대로."""
     overall = review.overall
     if overall is not None:
         return (overall - SCORE_PIVOT) * SCORE_SLOPE
     return STATUS_WEIGHTS.get(review.status or "", 0.0)
 
 
-def build_profile(features: ItemFeatures, reviews: dict[int, Review]) -> np.ndarray | None:
+def review_weight(
+    review: Review, opts: ProfileOptions | None = None, now: datetime | None = None
+) -> float:
+    opts = opts or ProfileOptions()
+    w = base_weight(review)
+    w = w**opts.like_power if w > 0 else w * opts.negative_scale
+    if opts.half_life_days and review.updated_at:
+        age_days = ((now or datetime.now(UTC)) - datetime.fromisoformat(review.updated_at)).days
+        w *= max(opts.recency_floor, 0.5 ** (max(0, age_days) / opts.half_life_days))
+    return w
+
+
+def build_profile(
+    features: ItemFeatures, reviews: dict[int, Review], opts: ProfileOptions | None = None
+) -> np.ndarray | None:
     """취향 벡터 (길이 1로 정규화). 긍정 신호가 하나도 없으면 None — 아직 추천할 근거가 없다."""
     rows, weights = [], []
+    now = datetime.now(UTC)
     for product_no, review in reviews.items():
         if product_no in features.index:
             rows.append(features.index[product_no])
-            weights.append(review_weight(review))
+            weights.append(review_weight(review, opts, now))
 
     if not any(w > 0 for w in weights):
         return None
@@ -65,5 +100,5 @@ def liked_rows(features: ItemFeatures, reviews: dict[int, Review]) -> list[tuple
     return [
         (features.index[no], w)
         for no, r in reviews.items()
-        if no in features.index and (w := review_weight(r)) > 0
+        if no in features.index and (w := base_weight(r)) > 0
     ]

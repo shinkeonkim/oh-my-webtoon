@@ -1,8 +1,12 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from my_webtoon import db
+from my_webtoon.config import load_settings
+from my_webtoon.web.app import create_app
 
 
 def comic_data(product_no: int, title: str, **overrides) -> dict:
@@ -110,3 +114,16 @@ def library(db_path: Path) -> Path:
         for r in rows:
             db.upsert_comic(conn, r)
     return db_path
+
+
+def make_client(library, password=None):
+    settings = replace(
+        load_settings(), database_path=library, app_password=password, crawl_enabled=False
+    )
+    return TestClient(create_app(settings))
+
+
+@pytest.fixture
+def client(library):
+    with make_client(library) as c:
+        yield c

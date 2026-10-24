@@ -39,6 +39,7 @@ class ScoringOptions:
     free_saturation: int = 50  # 무료 50화면 무료점수 만점
     episode_saturation: int = 300  # 총 300화면 회차점수 만점
     include_adult: bool = False
+    diversity: float = 0.3  # 다양화 세기 0~1 (engine._diversify, MMR). 0 이면 점수순 그대로
 
 
 def _episodes(comic: Comic, n: int | None) -> float:

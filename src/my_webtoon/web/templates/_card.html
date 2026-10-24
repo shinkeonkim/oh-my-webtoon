@@ -1,10 +1,21 @@
 {#- 작품 카드. 추천(rec)이면 순위·이유·점수 계산도 보여준다.
     editable: 평가 위젯을 누를 수 있는지 (기본: 로그인했으면 내 평가). show_memo: 메모 보이기 -#}
 {% import "_ui.html" as ui %}
-{% macro card(comic, review=None, rec=None, rank=None, editable=None, show_memo=None) %}
+{#- dismissable: 오른쪽 위 × (관심 없음) — 메인 추천 목록에서만 켠다. 누르면 카드가 접히고 '되돌리기'가 남는다. -#}
+{% macro card(comic, review=None, rec=None, rank=None, editable=None, show_memo=None, dismissable=False) %}
 {%- set editable = authed if editable is none else editable %}
 {%- set show_memo = editable if show_memo is none else show_memo %}
 <article class="card{{ ' is-stingy' if rec and rec.stingy }}">
+  {%- if dismissable and editable %}
+  <button type="button" class="icon-btn card__dismiss" title="관심 없음 — 추천에서 빼기" aria-label="관심 없음"
+          hx-post="/reviews/{{ comic.product_no }}/dismiss" hx-swap="none"
+          hx-on::after-request="if (event.detail.successful) this.closest('.card').classList.add('is-dismissed')">{{ ui.icon('x') }}</button>
+  <p class="card__undo">
+    <span><b>{{ comic.title }}</b> — 관심 없음으로 뺐어요</span>
+    <button type="button" class="btn btn--ghost btn--sm" hx-post="/reviews/{{ comic.product_no }}/undismiss" hx-swap="none"
+            hx-on::after-request="if (event.detail.successful) this.closest('.card').classList.remove('is-dismissed')">{{ ui.icon('undo', 14) }}<span>되돌리기</span></button>
+  </p>
+  {%- endif %}
   <a class="card__cover" href="/comic/{{ comic.product_no }}" tabindex="-1">
     {%- if comic.thumbnail_url %}<img src="{{ comic.thumbnail_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
     {%- if rank %}<span class="card__rank">{{ rank }}</span>{% endif %}
@@ -17,6 +28,7 @@
       {%- if comic.total_episodes %}{{ ui.badge(episodes_label(comic)) }}{% endif %}
       {%- if comic.naver_rating %}{{ ui.badge('%.1f' % comic.naver_rating, icon_name='star') }}{% endif %}
       {%- if comic.promo_label %}{{ ui.badge(comic.promo_label, 'promo', icon_name='clock') }}{% endif %}
+      {%- if comic.free_gain > 0 %}{{ ui.badge('무료 +' ~ comic.free_gain ~ comic.unit, 'promo', icon_name='bolt') }}{% endif %}
       {%- if rec and rec.variants %}{{ ui.badge('다른 판본 ' ~ rec.variants ~ '개') }}{% endif %}
     </div>
     {%- if rec %}

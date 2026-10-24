@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% from "_card.html" import card with context %}
+{% block title %}소식 · my-webtoon{% endblock %}
+{% block content %}
+{{ ui.page_header('소식', '주간 갱신 때 바뀐 것들 · 최근 ' ~ days ~ '일') }}
+
+<h2>이어 보기</h2>
+{% if watching %}
+<div class="grid">
+  {%- for review, comic in watching %}
+  {%- set progress = reading_progress(review, comic) %}
+  <article class="card card--compact">
+    <a class="card__cover" href="/comic/{{ comic.product_no }}" tabindex="-1">{% if comic.thumbnail_url %}<img src="{{ comic.thumbnail_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}</a>
+    <div class="card__body">
+      <h3 class="card__title"><a href="/comic/{{ comic.product_no }}">{{ comic.title }}</a></h3>
+      {%- if progress %}
+      {{ ui.progress(progress.percent, '읽은 비율') }}
+      <p class="card__meta">{{ progress.read }}/{{ comic.total_episodes }}{{ comic.unit }} · {{ progress.left }}{{ comic.unit }} 남음{% if progress.left %} · 그중 무료 <b>{{ progress.free_left }}{{ comic.unit }}</b>{% endif %}</p>
+      {%- else %}
+      <p class="card__meta">본 {{ comic.unit }}수를 적으면 남은 {{ comic.unit }}수와 무료로 더 볼 수 있는 양을 알려 드려요.</p>
+      {%- endif %}
+      <div class="row">
+        {%- set next = (review.episodes_read or 0) + 1 %}
+        {%- if not comic.total_episodes or next <= comic.total_episodes %}
+        {{ ui.button('+1' ~ comic.unit ~ ' 봤어요', 'secondary', 'sm', type='button', attrs='hx-post="/reviews/' ~ comic.product_no ~ '" hx-vals=\'{"episodes_read": "' ~ next ~ '"}\' hx-swap="none" hx-on::after-request="location.reload()"') }}
+        {%- endif %}
+        {{ ui.button('네이버 시리즈', 'ghost', 'sm', href=series_link(request, comic), attrs=('' if is_mobile(request) else 'target="_blank" rel="noopener"'), icon_name='external') }}
+      </div>
+    </div>
+  </article>
+  {%- endfor %}
+</div>
+{% else %}
+{{ ui.empty('"보는 중"인 작품이 없어요. 평가 위젯에서 보는 중을 누르면 여기 모여요.') }}
+{% endif %}
+
+<h2>바뀐 작품 <span class="muted">{{ news | length }}</span></h2>
+<p class="section-note">무료 회차가 늘었거나, 새 회차가 나왔거나, 완결됐거나, 기간 한정 무료가 시작된 작품. 내가 보는 중·보고 싶음·봤음인 작품이 위에 와요. 관심 없음·하차·낮은 점수를 준 작품은 빼요.</p>
+{% if news %}
+<div class="grid">
+  {%- for comic, changes in news %}
+  <div class="news-item">
+    <p class="news-item__head">
+      {%- if comic.product_no in mine %}{{ ui.badge('내 작품', 'solid') }}{% endif %}
+      {%- for ch in changes %}{{ ui.badge(news_label(ch, comic), 'promo' if ch.field in ('free_episodes', 'is_all_free', 'promo') else 'accent') }}{% endfor %}
+      <span class="muted small">{{ changes[0].changed_at | kst('%m-%d') }}</span>
+    </p>
+    {{ card(comic, reviews.get(comic.product_no)) }}
+  </div>
+  {%- endfor %}
+</div>
+{% else %}
+{{ ui.empty('아직 바뀐 작품이 없어요. 작품마다 일주일에 한 번 다시 수집하면서 바뀐 걸 모아요.') }}
+{% endif %}
+
+{% if promos %}
+<h2>지금 기간 한정 무료 <span class="muted">{{ promos | length }}</span></h2>
+<p class="section-note">네이버 시리즈 무료관 이벤트 중 아직 평가하지 않은 작품.</p>
+<div class="grid">{% for comic in promos %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}</div>
+{% endif %}
+{% endblock %}

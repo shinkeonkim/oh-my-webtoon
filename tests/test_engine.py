@@ -147,13 +147,29 @@ def test_work_key_groups_editions():
     assert work_key("나 혼자만 레벨업") != work_key("나 혼자 만렙 뉴비")
 
 
+def test_same_title_different_authors_are_different_works():
+    from my_webtoon.recommender.works import work_keys
+
+    from .conftest import comic_data
+
+    def comic(no, title, authors):
+        return db.Comic(**{**comic_data(no, title, authors=authors), "crawled_at": ""})
+
+    keys = work_keys([
+        comic(1, "킹덤", ["Yasuhisa HARA"]),
+        comic(2, "킹덤 [단행본]", ["HARA Yasuhisa"]),  # 성·이름 순서, 대소문자만 다름 → 같은 작품
+        comic(3, "킹덤", ["국내작가"]),  # 제목만 같은 다른 작품
+    ])  # fmt: skip
+    assert keys[1] == keys[2] != keys[3]
+
+
 def test_editions_are_grouped_and_reviewed_work_is_excluded(library):
     from .conftest import comic_data
 
     with db.session(library) as conn:
-        db.upsert_comic(conn, comic_data(60, "검황 회귀전 [단행본]", genre="무협", tags=["회귀"],
+        db.upsert_comic(conn, comic_data(60, "검황 회귀전 [단행본]", genre="무협", tags=["회귀"], authors=["이검객"],
                                          synopsis="검황이 회귀하여 무림에 복수한다", unit="권"))  # fmt: skip
-        db.upsert_comic(conn, comic_data(61, "천마 회귀록 [단행본]", genre="무협", tags=["회귀"],
+        db.upsert_comic(conn, comic_data(61, "천마 회귀록 [단행본]", genre="무협", tags=["회귀"], authors=["김무협"],
                                          synopsis="천마가 회귀해 무림을 평정한다", unit="권"))  # fmt: skip
         db.update_review(conn, ME, 1, score=10)  # '천마 회귀록' 평가
         recs = Engine().recommend(conn, ME, ScoringOptions(sink_stingy=False))

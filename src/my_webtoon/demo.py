@@ -72,6 +72,7 @@ def reset(conn: sqlite3.Connection, user: db.User) -> int:
     """평가를 지우고 기준 평가로 되돌린다. (아직 수집 안 된 작품은 건너뛴다)"""
     baseline = json.loads(db.get_meta(conn, _baseline_key(user.id)) or "[]")
     conn.execute("DELETE FROM reviews WHERE user_id = ?", (user.id,))
+    conn.execute("DELETE FROM quick_skips WHERE user_id = ?", (user.id,))
     restored = 0
     for item in baseline:
         if db.get_comic(conn, item["product_no"]) is None:

@@ -46,6 +46,11 @@
   <div class="mt-3">{{ ui.tabs([('#', '전체', none, true), ('#', '봤음', 12, false), ('#', '보는 중', 3, false)], '예시') }}</div>
 </section>
 
+<section class="panel ui-section">
+  <h2>progress · bar</h2>
+  <div class="stack">{{ ui.progress(35, '예시') }}{{ ui.bar('무협', 1, '12편') }}{{ ui.bar('#회귀', 0.6, '7편') }}</div>
+</section>
+
 <section class="ui-section">
   <h2>card</h2>
   {% if sample %}<div class="grid">{{ card(sample, none, editable=false) }}</div>{% else %}{{ ui.empty('작품이 없어 카드 예시를 못 보여요.') }}{% endif %}

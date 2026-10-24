@@ -24,7 +24,8 @@
   {%- if authed %}
     {%- set menu = [
       ('/', '추천', 'sparkle', path == '/', true),
-      ('/rate', '평가하기', 'star-outline', path == '/rate', true),
+      ('/rate', '평가하기', 'star-outline', path in ('/rate', '/quick'), true),
+      ('/news', '소식', 'bell', path == '/news', false),
       ('/comics', '작품', 'grid', path == '/comics' or path.startswith('/comic/'), true),
       (my_page, '평가 기록', 'list', path.startswith('/users'), true),
       ('/crawl', '수집', 'more', path == '/crawl', false),
@@ -58,7 +59,7 @@
     <a href="{{ href }}" class="tabbar__item{{ ' is-on' if on }}"{{ ' aria-current="page"' if on }}>{{ ui.icon(icon_name, 22) }}<span>{{ label }}</span></a>
     {%- endfor %}
     {%- if authed %}
-    <a href="/settings" class="tabbar__item{{ ' is-on' if path in ('/settings', '/crawl') }}">{{ ui.icon('more', 22) }}<span>더보기</span></a>
+    <a href="/settings" class="tabbar__item{{ ' is-on' if path in ('/settings', '/crawl', '/news') }}">{{ ui.icon('more', 22) }}<span>더보기</span></a>
     {%- endif %}
   </nav>
   <main>

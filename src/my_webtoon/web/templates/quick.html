@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}빠른 평가 · my-webtoon{% endblock %}
+{% block content %}
+{{ ui.page_header('빠른 평가', '한 장씩 보고 바로 누르세요. 봤을 법한 작품부터 나와요 — 평가가 많을수록 추천이 정확해져요.') }}
+{% include "_quick.html" %}
+{% endblock %}

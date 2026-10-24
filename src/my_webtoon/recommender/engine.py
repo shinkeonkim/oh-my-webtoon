@@ -3,6 +3,7 @@
     recommend()   내 취향 벡터와 비슷한 작품 (메인 화면)
     similar_to()  특정 작품과 비슷한 작품 (상세 화면)
     popular()     평가가 하나도 없을 때(콜드 스타트) 보여줄 목록
+    quick_queue() 빠른 평가 모드에서 물어볼 순서 ('봤을 것 같은' 작품부터)
 
 작품 벡터는 만드는 데 1초 남짓 걸리므로 메모리에 캐시하고,
 DB 의 작품 데이터가 바뀌었을 때(크롤링 후)만 다시 만든다.
@@ -10,26 +11,26 @@ DB 의 작품 데이터가 바뀌었을 때(크롤링 후)만 다시 만든다.
 
 from __future__ import annotations
 
+import json
 import math
 import secrets
 import sqlite3
 import threading
-import time
-from collections import OrderedDict
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
 from .. import db
 from ..db import Comic, Review
 from . import scoring
-from .features import ItemFeatures, build_features
-from .profile import build_profile, liked_rows
+from .features import DEFAULT_META_WEIGHT, DEFAULT_TEXT_WEIGHT, ItemFeatures, build_features
+from .profile import ProfileOptions, build_profile, liked_rows
 from .scoring import ScoringOptions
-from .works import work_key
+from .works import work_keys
 
-SNAPSHOT_TTL_SECONDS = 30 * 60
-SNAPSHOT_MAX = 64
+SNAPSHOT_TTL = timedelta(minutes=30)
+DIVERSITY_WINDOW = 150  # 다양화(MMR)는 앞쪽 이만큼만 다시 줄 세운다 — 뒤쪽은 어차피 잘 안 본다
 
 
 @dataclass
@@ -45,15 +46,19 @@ class Recommendation:
 
 
 class Engine:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        text_weight: float = DEFAULT_TEXT_WEIGHT,
+        meta_weight: float = DEFAULT_META_WEIGHT,
+        profile_opts: ProfileOptions | None = None,
+    ) -> None:
+        self.text_weight, self.meta_weight = text_weight, meta_weight
+        self.profile_opts = profile_opts or ProfileOptions()
         self._lock = threading.Lock()
         self._signature: tuple | None = None
         self._features: ItemFeatures | None = None
         self._comics: dict[int, Comic] = {}
         self._work: dict[int, str] = {}  # product_no → 작품 키 (판본 묶기)
-        # 무한 스크롤용 순위 스냅숏: 첫 페이지에서 전체 순위를 한 번 계산해 두고, 다음 페이지는 거기서 자른다.
-        # 스크롤하는 중에 평가를 남기거나 크롤러가 작품을 더해도 순위가 밀려 같은 작품이 두 번 나오지 않는다.
-        self._snapshots: OrderedDict[str, tuple[int, float, list[Recommendation]]] = OrderedDict()
 
     def invalidate(self) -> None:
         with self._lock:
@@ -69,10 +74,15 @@ class Engine:
             if signature != self._signature:
                 comics = db.all_comics(conn)
                 self._comics = {c.product_no: c for c in comics}
-                self._work = {c.product_no: work_key(c.title) for c in comics}
-                self._features = build_features(comics) if comics else None
+                self._work = work_keys(comics)
+                self._features = (
+                    build_features(comics, self.text_weight, self.meta_weight) if comics else None
+                )
                 self._signature = signature
             return self._features
+
+    def work_of(self, product_no: int) -> str | None:
+        return self._work.get(product_no)
 
     # -- 공개 API ------------------------------------------------------------
 
@@ -98,25 +108,26 @@ class Engine:
         snapshot: str | None = None,
     ) -> tuple[list[Recommendation], str]:
         """(이 페이지 추천, 스냅숏 토큰). 다음 페이지를 부를 때 토큰을 넘기면 같은 순위에서 이어서 자른다.
-        토큰이 없거나 만료됐으면(30분, 또는 다른 파드) 새로 계산한다."""
-        ranked = self._get_snapshot(snapshot, user_id)
-        if ranked is None:
-            ranked = self._rank_for_user(conn, user_id, opts)
-            snapshot = self._put_snapshot(user_id, ranked)
-        page = ranked[offset : offset + limit]
+        토큰이 없거나 만료됐으면(30분) 새로 계산한다. 스냅숏은 DB 에 있어서 어느 파드가 받아도 같다."""
         features = self._load(conn)
+        ranked = self._get_snapshot(conn, snapshot, user_id)
+        if ranked is None:
+            ranked = self.rank_for_reviews(db.all_reviews(conn, user_id), opts)
+            snapshot = self._put_snapshot(conn, user_id, ranked)
+        page = ranked[offset : offset + limit]
         if features is not None:
             self._explain(features, db.all_reviews(conn, user_id), page)
         return page, snapshot
 
-    def _rank_for_user(
-        self, conn: sqlite3.Connection, user_id: int, opts: ScoringOptions
+    def rank_for_reviews(
+        self, reviews: dict[int, Review], opts: ScoringOptions
     ) -> list[Recommendation]:
-        features = self._load(conn)
+        """평가 묶음 → 전체 추천 순위. DB 를 안 쓰는 순수 계산이라 평가 실험(evaluate.py)에서도 그대로 쓴다.
+        (_load 로 작품 벡터가 준비돼 있어야 한다)"""
+        features = self._features
         if features is None:
             return []
-        reviews = db.all_reviews(conn, user_id)
-        profile = build_profile(features, reviews)
+        profile = build_profile(features, reviews, self.profile_opts)
         if profile is None:
             return []
         similarities = features.matrix @ profile  # 모든 작품과 취향의 코사인 유사도 (한 번에)
@@ -125,26 +136,6 @@ class Engine:
         return self._rank(
             features, similarities, opts, exclude=set(reviews), exclude_works=reviewed_works
         )
-
-    def _put_snapshot(self, user_id: int, ranked: list[Recommendation]) -> str:
-        token = secrets.token_urlsafe(8)
-        with self._lock:
-            self._snapshots[token] = (user_id, time.monotonic(), ranked)
-            while len(self._snapshots) > SNAPSHOT_MAX:
-                self._snapshots.popitem(last=False)
-        return token
-
-    def _get_snapshot(self, token: str | None, user_id: int) -> list[Recommendation] | None:
-        if not token:
-            return None
-        with self._lock:
-            entry = self._snapshots.get(token)
-        if entry is None:
-            return None
-        owner, created, ranked = entry
-        if owner != user_id or time.monotonic() - created > SNAPSHOT_TTL_SECONDS:
-            return None
-        return ranked
 
     def similar_to(
         self,
@@ -186,15 +177,97 @@ class Engine:
             and (opts.include_adult or not scoring.is_adult(c))
         ]
         candidates.sort(key=lambda c: -math.log1p(c.popularity or 0) * scoring.boost(c, opts))
-        seen_works: set[str] = set()
-        result = []
-        for c in candidates:  # 판본 묶기: 작품마다 가장 위의 판본 하나
-            if self._work[c.product_no] not in seen_works:
-                seen_works.add(self._work[c.product_no])
-                result.append(c)
-        return result[:limit]
+        return self._one_per_work(candidates)[:limit]
+
+    def quick_queue(self, conn: sqlite3.Connection, user_id: int, limit: int = 20) -> list[Comic]:
+        """빠른 평가에서 물어볼 작품 순서. 목표는 '봤을 법한' 작품을 먼저 보여서 평가를 빨리 모으는 것.
+
+            우선순위 = log(1 + 다운로드 수) × (1 + 2 × 취향 유사도)
+
+        다운로드가 많을수록 봤을 확률이 높고, 취향과 비슷할수록 봤거나 볼 작품일 확률이 높다.
+        이미 평가했거나 '안 봤음'으로 넘긴 작품(판본 포함)은 빼고, 성인 작품도 뺀다.
+        """
+        features = self._load(conn)
+        if features is None:
+            return []
+        reviews = db.all_reviews(conn, user_id)
+        skipped = db.quick_skips(conn, user_id)
+        done_works = {self._work[no] for no in (*reviews, *skipped) if no in self._work}
+        profile = build_profile(features, reviews, self.profile_opts)
+        sims = (
+            np.asarray(features.matrix @ profile).ravel()
+            if profile is not None
+            else np.zeros(len(features.product_nos))
+        )
+        scored = []
+        for row, no in enumerate(features.product_nos):
+            comic = self._comics[no]
+            if self._work[no] in done_works or scoring.is_adult(comic):
+                continue
+            scored.append(
+                (math.log1p(comic.popularity or 0) * (1 + 2 * max(0.0, sims[row])), comic)
+            )
+        scored.sort(key=lambda sc: -sc[0])
+        return self._one_per_work([c for _, c in scored])[:limit]
+
+    # -- 스냅숏 (무한 스크롤) -----------------------------------------------------
+
+    def _put_snapshot(
+        self, conn: sqlite3.Connection, user_id: int, ranked: list[Recommendation]
+    ) -> str:
+        token = secrets.token_urlsafe(8)
+        items = [
+            [r.comic.product_no, r.similarity, r.boost, r.final, r.stingy, r.variants]
+            for r in ranked
+        ]
+        now = datetime.now(UTC)
+        conn.execute(
+            "DELETE FROM rec_snapshots WHERE created_at < ?",
+            ((now - SNAPSHOT_TTL).isoformat(timespec="seconds"),),
+        )
+        conn.execute(
+            "INSERT INTO rec_snapshots (token, user_id, created_at, items) VALUES (?, ?, ?, ?)",
+            (token, user_id, now.isoformat(timespec="seconds"), json.dumps(items)),
+        )
+        conn.commit()
+        return token
+
+    def _get_snapshot(
+        self, conn: sqlite3.Connection, token: str | None, user_id: int
+    ) -> list[Recommendation] | None:
+        if not token:
+            return None
+        row = conn.execute(
+            "SELECT user_id, created_at, items FROM rec_snapshots WHERE token = ?", (token,)
+        ).fetchone()
+        if row is None or row["user_id"] != user_id:
+            return None
+        if datetime.now(UTC) - datetime.fromisoformat(row["created_at"]) > SNAPSHOT_TTL:
+            return None
+        return [
+            Recommendation(
+                comic=self._comics[no],
+                similarity=sim,
+                boost=b,
+                final=final,
+                stingy=stingy,
+                variants=variants,
+            )  # fmt: skip
+            for no, sim, b, final, stingy, variants in json.loads(row["items"])
+            if no in self._comics  # 그사이 지워진 작품(제외 장르 등)은 건너뛴다
+        ]
 
     # -- 내부 ----------------------------------------------------------------
+
+    def _one_per_work(self, comics: list[Comic]) -> list[Comic]:
+        """판본 묶기: 작품마다 가장 앞의 판본 하나."""
+        seen: set[str] = set()
+        result = []
+        for c in comics:
+            if self._work[c.product_no] not in seen:
+                seen.add(self._work[c.product_no])
+                result.append(c)
+        return result
 
     def _rank(
         self,
@@ -234,7 +307,41 @@ class Engine:
             else:
                 first[key] = rec
                 unique.append(rec)
+        if opts.diversity > 0:
+            unique = self._diversify(features, unique, opts)
         return unique
+
+    def _diversify(
+        self, features: ItemFeatures, recs: list[Recommendation], opts: ScoringOptions
+    ) -> list[Recommendation]:
+        """MMR (Maximal Marginal Relevance) 다시 줄 세우기.
+
+        그냥 점수순이면 좋아한 작품 하나와 닮은 작품(같은 작가·같은 시리즈)이 위를 다 채운다.
+        그래서 한 장씩 고를 때마다 '이미 고른 것들과 얼마나 겹치는지'를 벌점으로 뺀다:
+
+            다음 = argmax  (1-d) × 점수/최고점수  -  d × max(이미 고른 작품과의 유사도)
+
+        d = opts.diversity (0 이면 점수순 그대로). '유료 위주' 묶음은 섞지 않고 원래대로 맨 뒤에 둔다.
+        """
+        head = [r for r in recs[:DIVERSITY_WINDOW] if not (r.stingy and opts.sink_stingy)]
+        if len(head) < 3:
+            return recs
+        head_ids = {id(r) for r in head}
+        rows = [features.index[r.comic.product_no] for r in head]
+        sim = np.asarray((features.matrix[rows] @ features.matrix[rows].T).todense())
+        relevance = np.array([r.final for r in head])
+        relevance = relevance / relevance.max()
+        d = opts.diversity
+        chosen: list[int] = []
+        max_overlap = np.zeros(len(head))
+        remaining = np.ones(len(head), dtype=bool)
+        for _ in range(len(head)):
+            gain = np.where(remaining, (1 - d) * relevance - d * max_overlap, -np.inf)
+            pick = int(np.argmax(gain))
+            chosen.append(pick)
+            remaining[pick] = False
+            max_overlap = np.maximum(max_overlap, sim[pick])
+        return [head[i] for i in chosen] + [r for r in recs if id(r) not in head_ids]
 
     def _explain(
         self, features: ItemFeatures, reviews: dict[int, Review], recs: list[Recommendation]
@@ -247,6 +354,8 @@ class Engine:
         liked_matrix = features.matrix[liked_idx]
         liked_nos = [features.product_nos[row] for row in liked_idx]
         for rec in recs:
+            if rec.comic.product_no not in features.index:
+                continue
             sims = np.asarray(
                 (liked_matrix @ features.row(rec.comic.product_no).T).todense()
             ).ravel()

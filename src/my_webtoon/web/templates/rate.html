@@ -3,7 +3,7 @@
 {% from "_card.html" import card with context %}
 {% block title %}평가하기 · my-webtoon{% endblock %}
 {% block content %}
-{{ ui.page_header('평가하기', '본 작품을 찾아 별점이나 상태를 남겨 주세요') }}
+{% call ui.page_header('평가하기', '본 작품을 찾아 별점이나 상태를 남겨 주세요') %}{{ ui.button('빠른 평가', 'primary', href='/quick', icon_name='bolt') }}{% endcall %}
 <form class="toolbar" method="get" action="/rate">
   <span class="input-icon">{{ ui.icon('search') }}<input class="input" type="search" name="q" value="{{ q }}" placeholder="제목이나 작가로 검색" autofocus></span>
   {{ ui.button('검색', 'primary') }}

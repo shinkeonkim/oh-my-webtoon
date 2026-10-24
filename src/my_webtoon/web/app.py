@@ -5,19 +5,23 @@ HTMX 로 부분 교체한다 — 프론트엔드 빌드 도구 없이 파이썬 
 
 라우트 한눈에 보기 (🔓 = 로그인 없이 볼 수 있음, 👑 = 관리자)
     GET  /                       내 추천 목록 (무한 스크롤: HX-Request 면 다음 페이지 조각만)
+    GET  /quick, POST /quick/{no}  빠른 평가 — 한 장씩 보여 주고 누르면 다음 장 (되돌리기 /quick/{no}/undo)
+    GET  /news                   소식: 이어 보기, 무료가 늘었어요, 완결, 기간 한정 무료
     GET  /rate?q=                검색해서 평가하기 (온보딩)
     POST /import                 네이버 시리즈 URL/번호로 작품 바로 가져오기
     GET  /comics                 🔓 수집된 작품 목록 (검색·장르·정렬, 무한 스크롤)
     GET  /comic/{no}             🔓 작품 상세 + 비슷한 작품
     GET  /users                  🔓 사용자 목록
     GET  /users/{name}           🔓 그 사용자의 평가 기록 (상태·점수 필터, 메모는 본인만)
+    GET  /users/{name}/taste     🔓 취향 요약 (점수 분포, 장르·작가·태그, 취향 키워드)
     GET  /me                     → /users/{내 아이디}
     POST /reviews/{no}           내 평가 저장 — 바꾼 칸만 반영 (HTMX 가 위젯만 갈아 끼운다)
     GET  /reviews/{no}/edit      세부 평가 폼 (스토리·작화·…, 본 화수, 메모)
     GET  /reviews/{no}/widget    폼 닫기 → 간단 위젯
     POST /reviews/{no}/delete    내 평가 전체 삭제
+    POST /reviews/{no}/dismiss   추천 카드의 × — '관심 없음' (undismiss 로 되돌리기)
     GET  /settings               비밀번호 변경, 평가 내보내기/가져오기, 👑 사용자 추가·백업
-    GET  /crawl, POST /crawl/run 크롤러 상태 / 👑 즉시 실행
+    GET  /crawl, POST /crawl/run 수집·운영 상태 (응답 시간 포함) / 👑 즉시 실행
     GET  /login, POST /login, POST /logout, GET /healthz   🔓
 """
 
@@ -28,6 +32,7 @@ import json
 import logging
 import re
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta, timezone
@@ -40,17 +45,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from .. import backup, db, demo
+from .. import backup, db, demo, taste
 from ..config import Settings, load_settings
 from ..crawler import runner
 from ..recommender import Engine, ScoringOptions
 from ..recommender import scoring as scoring_mod
 from . import auth
+from .metrics import RequestLog
 
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
 ALWAYS_PUBLIC = ("/login", "/static", "/healthz", "/readyz")
 PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui")  # 읽기 전용 공개 화면
+NEWS_DAYS = 30  # 소식 화면이 보여 주는 기간
 PER_PAGE = 30
 SCORE_FILTERS = {  # /users/{name}?score=...  점수는 0~10(=별 반 개 단위). 세부 점수만 있으면 평균을 반올림.
     "10": ("★5", lambda s: s is not None and round(s) == 10),
@@ -90,7 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     demo.reset_due(conn)
                     backup_due = settings.backup_dir and backup.backup_due(conn)
                 if backup_due:
-                    backup.run_backup(settings.database_path, settings.backup_dir)
+                    backup.backup_and_verify(settings.database_path, settings.backup_dir)
             except Exception:
                 log.exception("정기 작업 실패")
             stop_backup.wait(timeout=3600)
@@ -117,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="my-webtoon", lifespan=lifespan)
     app.state.settings, app.state.engine, app.state.crawler = settings, engine, crawler
+    request_log = app.state.request_log = RequestLog()
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(
         free_label=free_label,
@@ -126,6 +134,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         is_mobile=is_mobile,
         format_stars=format_stars,
         reason_label=reason_label,
+        news_label=news_label,
+        reading_progress=reading_progress,
         static_version=static_version(HERE / "static"),
         STATUSES=db.STATUSES,
         ASPECTS=db.ASPECTS,
@@ -166,6 +176,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         https_only=False,
         max_age=60 * 60 * 24 * 30,
     )
+
+    @app.middleware("http")
+    async def time_requests(request: Request, call_next):
+        """맨 바깥에서 응답 시간을 잰다 (metrics.py → /crawl 의 '응답 시간')."""
+        started = time.perf_counter()
+        response = await call_next(request)
+        route = request.scope.get("route")
+        request_log.add(
+            getattr(route, "path", request.url.path),
+            (time.perf_counter() - started) * 1000,
+            response.status_code,
+        )
+        return response
 
     def get_conn() -> Iterator:
         with db.session(settings.database_path) as conn:
@@ -227,7 +250,116 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "index.html",
             stats=db.queue_stats(conn),
             popular=[] if recs else engine.popular(conn, opts, user.id),
+            news_count=len(news_items(conn, user.id, days=7)["changes"]),
             **ctx,
+        )
+
+    # -- 빠른 평가 -------------------------------------------------------------
+    # 한 번에 한 작품만. 누르면 저장하고 바로 다음 작품 조각을 돌려준다 (HTMX 가 #quick 을 통째로 바꾼다).
+    # 목표는 평가 개수를 빨리 늘리는 것 — 평가가 많을수록 추천이 정확해진다 (docs/03).
+
+    QUICK_ACTIONS = {  # action → 저장할 상태 (None: 평가 안 함, '안 봤음'으로 넘기기만)
+        "seen": "seen",
+        "watching": "watching",
+        "wish": "wish",
+        "dismissed": "dismissed",
+        "skip": None,
+    }
+
+    def quick_card(request: Request, conn, done: int = 0, last=None):
+        user = me(request)
+        queue = engine.quick_queue(conn, user.id, limit=1)
+        return render(
+            request,
+            "_quick.html" if request.headers.get("HX-Request") else "quick.html",
+            comic=queue[0] if queue else None,
+            done=done,
+            last=last,
+            review_count=len(db.all_reviews(conn, user.id)),
+        )
+
+    @app.get("/quick", response_class=HTMLResponse)
+    def quick_page(request: Request, conn=Depends(get_conn)):
+        return quick_card(request, conn)
+
+    @app.post("/quick/{product_no}", response_class=HTMLResponse)
+    async def quick_answer(request: Request, product_no: int, conn=Depends(get_conn)):
+        user = me(request)
+        comic = comic_or_404(conn, product_no)
+        form = await request.form()
+        action = form.get("action", "")
+        if action == "score":
+            score = _opt_int(form.get("score"))
+            db.update_review(conn, user.id, product_no, score=score, status="seen")
+        elif action in QUICK_ACTIONS:
+            if QUICK_ACTIONS[action]:
+                db.update_review(conn, user.id, product_no, status=QUICK_ACTIONS[action])
+            else:
+                db.set_quick_skip(conn, user.id, product_no, True)
+        else:
+            raise HTTPException(400, f"모르는 동작: {action}")
+        return quick_card(request, conn, done=int(form.get("done", 0)) + 1, last=comic)
+
+    @app.post("/quick/{product_no}/undo", response_class=HTMLResponse)
+    async def quick_undo(request: Request, product_no: int, conn=Depends(get_conn)):
+        """방금 누른 것 되돌리기. 빠른 평가에는 평가 안 한 작품만 나오니, 지우면 원래 상태다."""
+        user = me(request)
+        comic_or_404(conn, product_no)
+        form = await request.form()
+        db.delete_review(conn, user.id, product_no)
+        db.set_quick_skip(conn, user.id, product_no, False)
+        return render(
+            request,
+            "_quick.html",
+            comic=db.get_comic(conn, product_no),
+            done=max(0, int(form.get("done", 1)) - 1),
+            last=None,
+            review_count=len(db.all_reviews(conn, user.id)),
+        )
+
+    # -- 소식 --------------------------------------------------------------------
+
+    def news_items(conn, user_id: int, days: int = NEWS_DAYS) -> dict:
+        """소식 화면 재료. 내가 '관심 없음'·낮은 점수를 준 작품 소식은 뺀다."""
+        reviews = db.all_reviews(conn, user_id)
+        hidden = {
+            no for no, r in reviews.items()
+            if r.status in ("dismissed", "dropped") or (r.overall is not None and r.overall < 5)
+        }  # fmt: skip
+        changes = [
+            (ch, c)
+            for ch, c in db.recent_changes(conn, days)
+            if c.product_no not in hidden and is_good_news(ch)
+        ]
+        return {"changes": changes, "reviews": reviews}
+
+    @app.get("/news", response_class=HTMLResponse)
+    def news_page(request: Request, conn=Depends(get_conn)):
+        user = me(request)
+        items = news_items(conn, user.id)
+        reviews = items["reviews"]
+        mine = {no for no, r in reviews.items() if r.status in ("watching", "wish", "seen")}
+        # 같은 작품에 소식이 여러 개면 (무료↑ + 총 화수↑) 한 카드로 묶는다
+        grouped: dict[int, tuple] = {}
+        for ch, comic in items["changes"]:
+            entry = grouped.setdefault(comic.product_no, (comic, []))
+            entry[1].append(ch)
+        news = sorted(grouped.values(), key=lambda e: e[1][0]["changed_at"], reverse=True)
+        news.sort(
+            key=lambda e: e[0].product_no not in mine
+        )  # 내가 보는·찜한 작품 소식을 위로 (안정 정렬)
+        watching = [
+            (r, c) for r, c in db.reviews_with_comics(conn, user.id) if r.status == "watching"
+        ]
+        return render(
+            request,
+            "news.html",
+            news=news,
+            mine=mine,
+            watching=watching,
+            promos=[c for c in db.promo_comics(conn) if c.product_no not in reviews][:24],
+            reviews=reviews,
+            days=NEWS_DAYS,
         )
 
     # -- 평가하기 (검색 + 가져오기) -------------------------------------------------
@@ -292,10 +424,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: str = "",
         genre: str = "",
         sort: str = "popular",
+        free: str = "",
+        status: str = "",
+        unrated: str = "",
         page: int = 0,
     ):
+        uid = my_id(request)
         comics, total = db.list_comics(
-            conn, query=q, genre=genre, sort=sort, limit=PER_PAGE, offset=page * PER_PAGE
+            conn,
+            query=q,
+            genre=genre,
+            sort=sort,
+            free=free,
+            status=status,
+            hide_reviewed_by=uid if unrated and uid else None,
+            limit=PER_PAGE,
+            offset=page * PER_PAGE,
         )
         ctx = dict(
             comics=comics,
@@ -313,8 +457,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             q=q,
             genre=genre,
             sort=sort,
+            free=free,
+            status=status,
+            unrated=unrated,
             genres=db.genres(conn),
             sorts=db.COMIC_SORTS,
+            free_filters=db.FREE_FILTERS,
+            status_filters=db.STATUS_FILTERS,
             **ctx,
         )
 
@@ -381,6 +530,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             score_filters={k: label for k, (label, _) in SCORE_FILTERS.items()},
         )
 
+    @app.get("/users/{username}/taste", response_class=HTMLResponse)
+    def user_taste(request: Request, username: str, conn=Depends(get_conn)):
+        owner = db.get_user_by_name(conn, username)
+        if owner is None:
+            raise HTTPException(404, "없는 사용자예요")
+        summary = taste.summarize(db.reviews_with_comics(conn, owner.id), engine, conn)
+        return render(request, "taste.html", owner=owner, taste=summary)
+
     # -- 평가 저장 (HTMX) — 항상 로그인한 본인의 평가만 ------------------------------------
 
     def review_widget(request: Request, conn, comic, template: str = "_review.html"):
@@ -423,6 +580,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
         return review_widget(request, conn, comic)
 
+    @app.post("/reviews/{product_no}/dismiss")
+    def dismiss(request: Request, product_no: int, conn=Depends(get_conn)):
+        """추천 카드의 × 버튼. 카드는 화면에서 접히고(클라이언트), 순위는 다음 새로고침부터 빠진다."""
+        comic_or_404(conn, product_no)
+        db.update_review(conn, me(request).id, product_no, status="dismissed")
+        return Response(status_code=204)
+
+    @app.post("/reviews/{product_no}/undismiss")
+    def undismiss(request: Request, product_no: int, conn=Depends(get_conn)):
+        user = me(request)
+        review = db.get_review(conn, user.id, product_no)
+        if review and review.status == "dismissed":
+            db.update_review(conn, user.id, product_no, status=None)
+        return Response(status_code=204)
+
     # -- 설정 -------------------------------------------------------------------
 
     @app.get("/settings", response_class=HTMLResponse)
@@ -436,6 +608,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             has_password=user.password_hash is not None,
             backup_dir=settings.backup_dir,
             last_backup_at=db.get_meta(conn, "last_backup_at"),
+            backup_check=backup.last_check(conn),
             review_count=len(db.all_reviews(conn, user.id)),
             users=db.list_users(conn) if user.is_admin else [],
         )
@@ -510,8 +683,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse(
                 "/settings?error=BACKUP_DIR 이 설정돼 있지 않아요", status_code=303
             )
-        path = backup.run_backup(settings.database_path, settings.backup_dir)
-        return RedirectResponse(f"/settings?msg=백업했어요: {path.name}", status_code=303)
+        check = backup.backup_and_verify(settings.database_path, settings.backup_dir)
+        if not check["ok"]:
+            return RedirectResponse(
+                f"/settings?error=백업은 만들었지만 검사에 실패했어요: {check['file']}",
+                status_code=303,
+            )
+        return RedirectResponse(
+            f"/settings?msg=백업하고 검사까지 마쳤어요: {check['file']}", status_code=303
+        )
 
     # -- 크롤러 ----------------------------------------------------------------
 
@@ -525,6 +705,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             running=crawler.running,
             settings=settings,
             seeds_at=db.get_meta(conn, "seeds_refreshed_at"),
+            timings=request_log.summary(),
+            timing_count=len(request_log),
+            timing_since=datetime.fromtimestamp(request_log.started, UTC).isoformat(),
         )
 
     @app.post("/crawl/run")
@@ -612,6 +795,8 @@ def parse_review_form(form, current: db.Review | None) -> dict:
         changes["score"] = _opt_int(form["score"])
     if "status" in form:
         changes["status"] = form["status"] or None
+    if "episodes_read" in form:  # 소식 화면 '이어 보기'의 +1화 버튼
+        changes["episodes_read"] = _opt_int(form["episodes_read"])
     toggle = form.get("toggle")
     if toggle in changes and current is not None and getattr(current, toggle) == changes[toggle]:
         changes[toggle] = None
@@ -637,6 +822,7 @@ def options_from_query(request: Request) -> ScoringOptions:
         stingy_threshold=int(num("stingy_threshold", d.stingy_threshold)),
         sink_stingy=(q.get("sink") == "1") if tuned else d.sink_stingy,
         include_adult=(q.get("adult") == "1") if tuned else d.include_adult,
+        diversity=min(1.0, max(0.0, num("diversity", d.diversity))),
     )
 
 
@@ -714,6 +900,46 @@ def static_version(static_dir: Path) -> str:
     for path in sorted(static_dir.iterdir()):
         digest.update(path.read_bytes())
     return digest.hexdigest()[:8]
+
+
+def is_good_news(change) -> bool:
+    """소식으로 보여 줄 만한 변화인가: 무료↑, 전부 무료가 됨, 완결, 새 회차, 기간 한정 무료."""
+    field, old, new = change["field"], change["old_value"], change["new_value"]
+    if field in ("free_episodes", "total_episodes"):
+        return int(new or 0) > int(old or 0)
+    if field == "is_all_free":
+        return str(new) == "1"
+    if field == "status":
+        return new == "완결"
+    return field == "promo"
+
+
+def news_label(change, comic) -> str:
+    field, old, new = change["field"], change["old_value"], change["new_value"]
+    unit = comic.unit
+    if field == "free_episodes":
+        return f"무료 {old}→{new}{unit} (+{int(new) - int(old or 0)})"
+    if field == "total_episodes":
+        return f"새 {unit} {int(new) - int(old or 0)}개 (총 {new}{unit})"
+    if field == "is_all_free":
+        return f"전{unit} 무료가 됐어요"
+    if field == "status":
+        return "완결됐어요"
+    return f"기간 한정: {new}"
+
+
+def reading_progress(review, comic) -> dict | None:
+    """'이어 보기' 계산. 본 화수를 기록했을 때만: 남은 화수, 그중 무료로 볼 수 있는 화수."""
+    if review is None or review.episodes_read is None or not comic.total_episodes:
+        return None
+    read = min(review.episodes_read, comic.total_episodes)
+    free_until = comic.total_episodes if comic.is_all_free else (comic.free_episodes or 0)
+    return {
+        "read": read,
+        "left": comic.total_episodes - read,
+        "free_left": max(0, free_until - read),
+        "percent": round(100 * read / comic.total_episodes),
+    }
 
 
 def free_label(comic) -> str:

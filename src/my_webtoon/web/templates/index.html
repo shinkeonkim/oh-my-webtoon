@@ -6,7 +6,7 @@
   {% call ui.empty() %}아직 수집한 작품이 없어요. <a href="/crawl">수집 화면</a>에서 먼저 수집해 주세요.{% endcall %}
 {% elif not recs %}
   {{ ui.page_header('추천을 시작하려면', '본 작품에 별점을 주거나 "봤음"·"보고 싶음"을 눌러 주세요. 긍정 평가가 하나만 있어도 추천이 시작돼요.') }}
-  <p class="row mb-5">{{ ui.button('검색해서 평가하기', 'primary', href='/rate', icon_name='search') }}</p>
+  <p class="row mb-5">{{ ui.button('빠른 평가 시작', 'primary', href='/quick', icon_name='bolt') }}{{ ui.button('검색해서 평가하기', 'secondary', href='/rate', icon_name='search') }}</p>
   {% if popular %}
   <h2>많이 본 작품부터</h2>
   <div class="grid">{% for comic in popular %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}</div>
@@ -22,13 +22,18 @@
       {% call ui.field('총 회차 b') %}<input class="input" type="number" step="0.1" min="0" name="episode_weight" value="{{ opts.episode_weight }}">{% endcall %}
       {% call ui.field('네이버 평점 c') %}<input class="input" type="number" step="0.1" min="0" name="rating_weight" value="{{ opts.rating_weight }}">{% endcall %}
       {% call ui.field('유료 위주 기준', '무료가 이 화수 이하') %}<input class="input" type="number" min="0" name="stingy_threshold" value="{{ opts.stingy_threshold }}">{% endcall %}
+      {% call ui.field('다양화', '0~1, 비슷한 작품끼리 몰리지 않게') %}<input class="input" type="number" step="0.1" min="0" max="1" name="diversity" value="{{ opts.diversity }}">{% endcall %}
       <label class="check"><input type="checkbox" name="sink" value="1"{{ ' checked' if opts.sink_stingy }}> 유료 위주는 맨 뒤로</label>
       <label class="check"><input type="checkbox" name="adult" value="1"{{ ' checked' if opts.include_adult }}> 성인 작품 포함</label>
       <div class="row">{{ ui.button('다시 계산', 'primary') }}{{ ui.button('기본값', 'ghost', href='/') }}</div>
     </form>
   </details>
 
-  <p class="section-note">평가하면 그 카드만 바뀌고, 순위는 새로고침하면 다시 계산돼요.</p>
+  <div class="home-links">
+    {%- if news_count %}<a class="home-link home-link--news" href="/news">{{ ui.icon('bell') }}<span>지난 7일 소식 <b>{{ news_count }}</b>개 — 무료가 늘었거나 완결된 작품</span></a>{% endif %}
+    <a class="home-link" href="/quick">{{ ui.icon('bolt') }}<span>빠른 평가 — 평가가 많을수록 추천이 정확해져요</span></a>
+  </div>
+  <p class="section-note">평가하면 그 카드만 바뀌고, 순위는 새로고침하면 다시 계산돼요. 카드의 ×는 '관심 없음'이에요.</p>
   <div class="grid">{% include "_rec_page.html" %}</div>
 {% endif %}
 {% endblock %}

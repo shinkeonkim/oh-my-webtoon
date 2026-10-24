@@ -1,26 +1,11 @@
-from dataclasses import replace
-
 import pytest
-from fastapi.testclient import TestClient
 
 from my_webtoon import db
-from my_webtoon.config import load_settings
-from my_webtoon.web.app import create_app, parse_product_no
+from my_webtoon.web.app import parse_product_no
+
+from .conftest import make_client
 
 HX = {"HX-Request": "true"}
-
-
-def make_client(library, password=None):
-    settings = replace(
-        load_settings(), database_path=library, app_password=password, crawl_enabled=False
-    )
-    return TestClient(create_app(settings))
-
-
-@pytest.fixture
-def client(library):
-    with make_client(library) as c:
-        yield c
 
 
 ME = 1  # 관리자 singun11
@@ -297,7 +282,7 @@ def test_mobile_tabbar_and_favicon(client):
         assert client.get(path).status_code == 200, path
     tabbar = page.split('class="tabbar"', 1)[1].split("</nav>", 1)[0]
     assert all(label in tabbar for label in ("추천", "평가하기", "작품", "평가 기록", "더보기"))
-    assert "수집 현황" in client.get("/settings").text  # 탭바에 없는 메뉴는 '더보기'(설정)에서
+    assert "수집·운영" in client.get("/settings").text  # 탭바에 없는 메뉴는 '더보기'(설정)에서
 
 
 def test_kst_filter_and_mobile_link():

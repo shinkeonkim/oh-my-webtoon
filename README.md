@@ -24,6 +24,8 @@
 3. **화면** — 추천 카드마다 별점(반 개 단위, 0~10점) / 봤음·보는 중·하차·보고 싶음·관심 없음 / "자세히"(스토리·작화·캐릭터·전개·몰입도,
    본 화수, 메모) 가 있어서 이미 본 작품이 추천되면 그 자리에서 평가한다. 모든 칸이 선택 사항이고 서로 독립이다.
    작품 목록과 사용자별 평가 기록은 로그인 없이 공개, 추천·평가·설정은 로그인 필요.
+   **빠른 평가**(`/quick`)로 한 장씩 빠르게 평가를 모으고, **소식**(`/news`)에서 무료가 늘었거나 완결된 작품과 이어 볼 작품을,
+   **취향**(`/users/{id}/taste`)에서 내 평가 통계와 추천기가 보는 내 취향을 본다.
 4. **사용자** — 수집한 작품 데이터는 모두가 공유하고, 평가와 추천만 사용자별이다. 첫 관리자는 `singun11`,
    관리자가 `/settings` 에서 사용자를 추가한다(공개 가입 없음).
 
@@ -35,6 +37,8 @@
 | 2 | `src/my_webtoon/crawler/parser.py` | HTML → dict. 순수 함수라 테스트로 동작을 확인하기 쉽다 |
 | 3 | `src/my_webtoon/crawler/runner.py` | 시드 → 큐 → 상세 → 링크 확장 루프 |
 | 4 | `src/my_webtoon/recommender/features.py` → `profile.py` → `scoring.py` → `engine.py` | 추천 4단계 |
+| 4-1 | `src/my_webtoon/recommender/evaluate.py` | 추천 품질 측정 (`my-webtoon eval`) — 가중치를 고른 근거 |
+| 4-2 | `src/my_webtoon/taste.py` | 취향 요약 (`/users/{id}/taste`) |
 | 5 | `src/my_webtoon/web/app.py` + `templates/` | 라우트와 화면 |
 | 6 | `tests/` | 각 단계가 무엇을 보장하는지 (`test_engine.py` 가 추천 동작 명세 역할) |
 

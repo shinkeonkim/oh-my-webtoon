@@ -8,6 +8,11 @@ SQLite 파일은 Longhorn 볼륨(복제본 1개)에 있다. 파드가 죽거나 
       reviews-20261024T120000Z.json       사용자별 평가 (사람이 읽을 수 있는 형태, /settings 에서 가져오기 가능)
 
 최근 KEEP 개만 남기고 오래된 건 지운다.
+
+백업은 "되살릴 수 있어야" 백업이다. 그래서 만들 때마다 verify_backup() 으로 사본을 열어 본다:
+    - PRAGMA integrity_check 가 ok 인지 (파일이 깨지지 않았는지)
+    - 사본의 작품·평가·사용자 수가 원본과 맞는지 (백업 직후라 같아야 한다)
+결과는 meta 'last_backup_check' 에 남기고 /settings 에 보여 준다. 실제 복구 절차는 docs/04.
 """
 
 from __future__ import annotations
@@ -112,6 +117,51 @@ def run_backup(database_path: Path, backup_dir: Path, keep: int = KEEP) -> Path:
             old.unlink()
     log.info("백업 완료: %s", target)
     return target
+
+
+def verify_backup(backup_path: Path, live: sqlite3.Connection | None = None) -> dict:
+    """백업 파일을 읽기 전용으로 열어 검사한다. live 를 주면 행 수를 원본과 비교한다."""
+    tables = ("comics", "reviews", "users")
+    result: dict = {"file": backup_path.name, "checked_at": db.now_iso()}
+    conn = sqlite3.connect(f"file:{backup_path}?mode=ro", uri=True)
+    try:
+        result["integrity"] = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        # 옛 스키마 백업(예: users 가 생기기 전)도 검사할 수 있게, 있는 테이블만 센다.
+        # 그런 백업도 복구는 된다 — 앱이 뜰 때 init_schema() 가 마이그레이션한다 (docs/04 복구 연습).
+        present = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        result["counts"] = {
+            t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            for t in tables
+            if t in present
+        }
+    except sqlite3.DatabaseError as exc:
+        result.update(integrity=f"열 수 없음: {exc}", counts={})
+    finally:
+        conn.close()
+    if live is not None:
+        result["live"] = {
+            t: live.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables
+        }
+    result["ok"] = result["integrity"] == "ok" and (
+        live is None or result["counts"] == result["live"]
+    )
+    return result
+
+
+def backup_and_verify(database_path: Path, backup_dir: Path) -> dict:
+    """백업 → 바로 검사 → 결과를 meta 에 남긴다. 정기 작업과 '지금 백업' 버튼이 이걸 부른다."""
+    target = run_backup(database_path, backup_dir)
+    with db.session(database_path) as conn:
+        check = verify_backup(target, conn)
+        db.set_meta(conn, "last_backup_check", json.dumps(check, ensure_ascii=False))
+    if not check["ok"]:
+        log.error("백업 검사 실패: %s", check)
+    return check
+
+
+def last_check(conn: sqlite3.Connection) -> dict | None:
+    raw = db.get_meta(conn, "last_backup_check")
+    return json.loads(raw) if raw else None
 
 
 def backup_due(conn: sqlite3.Connection, hours: float = 24) -> bool:

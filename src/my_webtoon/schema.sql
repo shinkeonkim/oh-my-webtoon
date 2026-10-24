@@ -82,3 +82,33 @@ CREATE TABLE IF NOT EXISTS meta (
     key             TEXT PRIMARY KEY,
     value           TEXT NOT NULL
 );
+
+-- 추천 순위 스냅숏 (무한 스크롤). 첫 페이지에서 전체 순위를 저장해 두고 다음 페이지는 여기서 자른다.
+-- 메모리가 아니라 DB 에 두는 이유: 무중단 배포 중엔 옛 파드와 새 파드가 같이 요청을 받아서,
+-- 스크롤하다 다른 파드로 넘어가도 같은 순위를 이어 가야 한다. 30분 지나면 지운다.
+CREATE TABLE IF NOT EXISTS rec_snapshots (
+    token           TEXT    PRIMARY KEY,
+    user_id         INTEGER NOT NULL,
+    created_at      TEXT    NOT NULL,
+    items           TEXT    NOT NULL                -- JSON: [[product_no, 유사도, 보정, 최종, 유료위주, 판본수], ...]
+);
+
+-- 작품 정보가 바뀐 기록 (주간 갱신 때 비교). '무료가 늘었어요'·'완결됐어요' 소식에 쓴다.
+CREATE TABLE IF NOT EXISTS comic_changes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_no      INTEGER NOT NULL,
+    field           TEXT    NOT NULL,               -- free_episodes / total_episodes / status / is_all_free / promo
+    old_value       TEXT,
+    new_value       TEXT,
+    changed_at      TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comic_changes_at ON comic_changes(changed_at);
+CREATE INDEX IF NOT EXISTS idx_comic_changes_no ON comic_changes(product_no);
+
+-- 빠른 평가에서 '안 봤음'을 누른 작품. 평가(취향)는 아니라서 reviews 와 따로 두고, 다시 묻지 않는 데만 쓴다.
+CREATE TABLE IF NOT EXISTS quick_skips (
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_no      INTEGER NOT NULL,
+    skipped_at      TEXT    NOT NULL,
+    PRIMARY KEY (user_id, product_no)
+);
