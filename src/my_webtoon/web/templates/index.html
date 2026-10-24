@@ -35,11 +35,7 @@
 
 <p class="meta-line">평가 {{ reviews | length }}개 기반 · 수집된 작품 {{ stats.comics }}개 중 최종 점수 높은 순 (유료 위주 작품은 맨 뒤) · 평가하면 그 카드만 바뀌고, 순위는 새로고침하면 다시 계산돼요</p>
 <div class="grid">
-  {% for rec in recs %}{{ card(rec.comic, reviews.get(rec.comic.product_no), rec, rank_offset + loop.index) }}{% endfor %}
+  {% include "_rec_page.html" %}
 </div>
-<nav class="pager">
-  {% if page > 0 %}<a href="/?{{ query_string }}&page={{ page - 1 }}">← 이전</a>{% endif %}
-  {% if has_next %}<a href="/?{{ query_string }}&page={{ page + 1 }}">다음 →</a>{% endif %}
-</nav>
 {% endif %}
 {% endblock %}

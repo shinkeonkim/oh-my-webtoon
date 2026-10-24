@@ -1,9 +1,12 @@
 """크롤링 한 번(run) = 아래 3단계.
 
     1. 시드 갱신 (하루 한 번): TOP100/무료관 페이지에서 productNo 를 모아 큐에 넣는다.
-    2. 재수집 예약: 오래된 작품(기본 7일)을 다시 pending 으로 — 무료 회차 수가 자주 바뀐다.
-    3. 큐 처리: pending 인 작품의 상세 페이지를 최대 batch_size 개 가져와 저장하고,
-       그 페이지 안에서 발견한 다른 작품 링크를 다시 큐에 넣는다 (BFS).
+    2. 할 일 고르기 (batch_size 개):
+         - 갱신: 마지막 수집이 recrawl_after_days(기본 7일) 넘은 작품 — 총 화수·연재중/완결·무료 화수가
+           바뀌므로 주 1회 다시 본다. 오래된 것부터.
+         - 발견: 큐에 새로 들어온 작품.
+       갱신에 최대 절반을 쓰고 나머지는 발견에. 한쪽이 모자라면 남는 몫을 다른 쪽이 쓴다.
+    3. 처리: 상세 페이지를 가져와 저장하고, 그 페이지 안에서 발견한 다른 작품 링크를 다시 큐에 넣는다 (BFS).
 
 몇 번만 돌려도 시드 수백 개 → 연관작을 타고 수천 개로 불어난다.
 """
@@ -28,6 +31,7 @@ SEED_REFRESH = timedelta(hours=24)
 @dataclass
 class RunResult:
     fetched: int = 0
+    refreshed: int = 0  # fetched 중 '갱신'(이미 있던 작품) 몫
     discovered: int = 0
     skipped: int = 0
     failed: int = 0
@@ -35,7 +39,7 @@ class RunResult:
 
     def summary(self) -> str:
         return (
-            f"수집 {self.fetched}, 신규 발견 {self.discovered}, "
+            f"수집 {self.fetched}(갱신 {self.refreshed}), 신규 발견 {self.discovered}, "
             f"건너뜀 {self.skipped}, 실패 {self.failed}"
         )
 
@@ -77,6 +81,19 @@ def _seeds_due(conn) -> bool:
     return last is None or datetime.now(UTC) - datetime.fromisoformat(last) > SEED_REFRESH
 
 
+def plan_batch(stale: list[int], fresh: list[int], batch_size: int) -> list[int]:
+    """갱신(stale)에 최대 절반, 발견(fresh)에 나머지. 남는 몫은 서로 넘겨 쓴다."""
+    half = batch_size // 2
+    plan = list(dict.fromkeys(stale[:half]))
+    for pool in (fresh, stale[half:]):
+        for no in pool:
+            if len(plan) >= batch_size:
+                return plan
+            if no not in plan:
+                plan.append(no)
+    return plan
+
+
 def run_once(
     database_path: Path,
     *,
@@ -96,10 +113,11 @@ def run_once(
                 log.info("시드 갱신 중")
                 refresh_seeds(conn, client, result, stop)
 
-            db.requeue(conn, db.stale_product_nos(conn, recrawl_after_days, batch_size // 3))
-            conn.commit()
+            stale = db.stale_product_nos(conn, recrawl_after_days, batch_size)
+            plan = plan_batch(stale, db.next_pending(conn, batch_size), batch_size)
+            stale_set = set(stale)
 
-            for product_no in db.next_pending(conn, batch_size):
+            for product_no in plan:
                 if stop.is_set():
                     result.notes.append("중간에 멈춤")
                     break
@@ -114,9 +132,11 @@ def run_once(
                     result.failed += 1
                 else:
                     db.upsert_comic(conn, data)
+                    db.enqueue(conn, [product_no], None)  # 큐에 없던 작품(가져오기 등)도 기록
                     db.mark_crawled(conn, product_no, "done")
                     result.discovered += db.enqueue(conn, links, product_no)
                     result.fetched += 1
+                    result.refreshed += product_no in stale_set
                 conn.commit()
         finally:
             db.finish_run(

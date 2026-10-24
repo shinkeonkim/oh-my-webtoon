@@ -60,12 +60,18 @@ class Engine:
     # -- 공개 API ------------------------------------------------------------
 
     def recommend(
-        self, conn: sqlite3.Connection, opts: ScoringOptions, limit: int = 30, offset: int = 0
+        self,
+        conn: sqlite3.Connection,
+        user_id: int,
+        opts: ScoringOptions,
+        limit: int = 30,
+        offset: int = 0,
     ) -> list[Recommendation]:
+        """user_id 의 평가로 만든 취향에 맞는 작품. 작품 벡터는 모든 사용자가 공유한다."""
         features = self._load(conn)
         if features is None:
             return []
-        reviews = db.all_reviews(conn)
+        reviews = db.all_reviews(conn, user_id)
         profile = build_profile(features, reviews)
         if profile is None:
             return []
@@ -77,14 +83,19 @@ class Engine:
         return page
 
     def similar_to(
-        self, conn: sqlite3.Connection, product_no: int, opts: ScoringOptions, limit: int = 12
+        self,
+        conn: sqlite3.Connection,
+        product_no: int,
+        opts: ScoringOptions,
+        user_id: int | None = None,
+        limit: int = 12,
     ) -> list[Recommendation]:
         features = self._load(conn)
         if features is None or product_no not in features.index:
             return []
         target = features.row(product_no)
         similarities = np.asarray((features.matrix @ target.T).todense()).ravel()
-        reviews = db.all_reviews(conn)
+        reviews = db.all_reviews(conn, user_id)
         exclude = {product_no} | {no for no, r in reviews.items() if r.status == "dismissed"}
         recs = self._rank(features, similarities, opts, exclude=exclude)[:limit]
         for rec in recs:
@@ -92,11 +103,15 @@ class Engine:
         return recs
 
     def popular(
-        self, conn: sqlite3.Connection, opts: ScoringOptions, limit: int = 30
+        self,
+        conn: sqlite3.Connection,
+        opts: ScoringOptions,
+        user_id: int | None = None,
+        limit: int = 30,
     ) -> list[Comic]:
         """콜드 스타트: 많이 본 작품 중 무료 많은 순. 여기서 '봤던 것'을 골라 평가하면 된다."""
         self._load(conn)
-        reviewed = set(db.all_reviews(conn))
+        reviewed = set(db.all_reviews(conn, user_id))
         candidates = [
             c
             for c in self._comics.values()

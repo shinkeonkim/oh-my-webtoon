@@ -184,3 +184,12 @@ details.import input[name=url] { flex: 1; min-width: 0; }
 
 .login { max-width: 320px; margin: 15vh auto; text-align: center; }
 .login form { display: flex; flex-direction: column; gap: 8px; }
+
+/* 무한 스크롤 / 사용자 */
+.sentinel { grid-column: 1 / -1; text-align: center; padding: 16px; color: var(--muted); }
+.sentinel a { color: var(--muted); }
+.user-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.btn.ghost { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); }
+.naver-search { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 16px; }
+label.check { display: inline-flex; gap: 4px; align-items: center; font-size: .85rem; color: var(--muted); }
+.login form input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); }

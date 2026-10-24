@@ -1,0 +1,12 @@
+{#- 추천 카드 한 페이지 + 다음 페이지를 부르는 센티넬. 센티넬이 화면에 보이면(revealed) HTMX 가
+    /?page=N+1 을 불러 자기 자신을 그 결과로 바꾼다 → 무한 스크롤. API 자체는 그냥 페이지네이션이다. -#}
+{% from "_card.html" import card with context %}
+{% for rec in recs %}{{ card(rec.comic, reviews.get(rec.comic.product_no), rec, rank_offset + loop.index) }}{% endfor %}
+{% if has_next %}
+<div class="sentinel" hx-get="/?{{ query_string }}{{ '&' if query_string }}page={{ page + 1 }}"
+     hx-trigger="revealed" hx-swap="outerHTML">
+  <a href="/?{{ query_string }}{{ '&' if query_string }}page={{ page + 1 }}">더 불러오는 중…</a>
+</div>
+{% elif page > 0 %}
+<p class="sentinel muted">추천을 끝까지 다 봤어요.</p>
+{% endif %}

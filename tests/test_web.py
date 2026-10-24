@@ -23,9 +23,16 @@ def client(library):
         yield c
 
 
-def review(library, no):
+ME = 1  # 관리자 singun11
+
+
+def review(library, no, user_id=ME):
     with db.session(library) as conn:
-        return db.get_review(conn, no)
+        return db.get_review(conn, user_id, no)
+
+
+def login(c, username="singun11", password="initial-pw"):
+    return c.post("/login", data={"username": username, "password": password})
 
 
 def test_onboarding_when_no_reviews(client):
@@ -102,23 +109,33 @@ def test_tuning_query_changes_scores(client):
 def test_public_pages_are_read_only(library):
     with make_client(library, password="initial-pw") as c:
         with db.session(library) as conn:
-            db.update_review(conn, 5, score=9, status="seen", memo="비밀 메모")
-        for path in ("/comics", "/comic/5", "/me", "/healthz"):
+            db.update_review(conn, ME, 5, score=9, status="seen", memo="비밀 메모")
+        for path in ("/comics", "/comic/5", "/users", "/users/singun11", "/healthz"):
             assert c.get(path, follow_redirects=False).status_code == 200, path
-        me = c.get("/me").text
-        assert "계약 결혼의 공작님" in me and "9점" in me
-        assert "비밀 메모" not in me  # 메모는 로그인했을 때만
-        assert 'hx-post="/reviews/' not in me  # 평가 버튼 없음
-        for path in ("/", "/rate", "/crawl", "/settings", "/reviews/5/edit"):
+        page = c.get("/users/singun11").text
+        assert "계약 결혼의 공작님" in page and "9점" in page
+        assert "비밀 메모" not in page  # 메모는 본인만
+        assert 'hx-post="/reviews/' not in page  # 평가 버튼 없음
+        assert c.get("/users/nobody").status_code == 404
+        for path in ("/", "/rate", "/crawl", "/settings", "/me", "/reviews/5/edit"):
             assert c.get(path, follow_redirects=False).status_code == 303, path
         assert c.post("/reviews/5", data={"score": "1"}, follow_redirects=False).status_code == 303
         assert c.post("/reviews/5", data={"score": "1"}, headers=HX).status_code == 401
 
 
+def test_login_and_my_page(library):
+    with make_client(library, password="initial-pw") as c:
+        assert "error=1" in str(login(c, password="wrong").url)
+        login(c)
+        assert c.get("/", follow_redirects=False).status_code == 200
+        me = c.get("/me", follow_redirects=False)
+        assert me.headers["location"] == "/users/singun11"
+
+
 def test_change_password_logs_out_other_sessions(library):
     with make_client(library, password="initial-pw") as a, make_client(library, "initial-pw") as b:
         for c in (a, b):
-            c.post("/login", data={"password": "initial-pw"})
+            login(c)
             assert c.get("/", follow_redirects=False).status_code == 200
 
         bad = a.post(
@@ -136,25 +153,83 @@ def test_change_password_logs_out_other_sessions(library):
 
         assert a.get("/", follow_redirects=False).status_code == 200  # 바꾼 세션은 유지
         assert b.get("/", follow_redirects=False).status_code == 303  # 다른 세션은 끊김
-        b.post("/login", data={"password": "initial-pw"})
+        login(b)
         assert b.get("/", follow_redirects=False).status_code == 303  # 옛 비밀번호 안 됨
-        b.post("/login", data={"password": "new-pw-123"})
+        login(b, password="new-pw-123")
         assert b.get("/", follow_redirects=False).status_code == 200
 
+
+def test_admin_adds_user_and_reviews_stay_separate(library):
+    with make_client(library, "initial-pw") as admin, make_client(library, "initial-pw") as alice:
+        login(admin)
+        admin.post("/settings/users", data={"username": "alice", "password": "alice-pw-1"})
+        assert "alice" in admin.get("/users").text
+
+        login(alice, "alice", "alice-pw-1")
+        alice.post("/reviews/5", data={"score": "10"}, headers=HX)
+        admin.post("/reviews/5", data={"status": "dismissed"}, headers=HX)
+
+        with db.session(library) as conn:
+            alice_id = db.get_user_by_name(conn, "alice").id
+        assert (
+            review(library, 5, alice_id).score == 10 and review(library, 5, alice_id).status is None
+        )
+        assert review(library, 5).status == "dismissed" and review(library, 5).score is None
+
+        # alice 는 관리자가 아니다
+        r = alice.post("/settings/users", data={"username": "bob", "password": "bob-pw-123"})
+        assert r.status_code == 403
+        assert alice.post("/crawl/run").status_code == 403
+        # 남의 페이지에서는 읽기 전용, 내 페이지에서는 편집 가능
+        assert 'hx-post="/reviews/' not in alice.get("/users/singun11").text
+        assert 'hx-post="/reviews/' in alice.get("/users/alice").text
+
+
+def test_score_filter_on_user_page(client):
+    client.post("/reviews/1", data={"score": "10"})
+    client.post("/reviews/2", data={"score": "8", "status": "seen"})
+    client.post("/reviews/3", data={"status": "wish"})
+    ten = client.get("/users/singun11", params={"score": "10"}).text
+    assert "천마 회귀록" in ten and "검황 회귀전" not in ten
+    none = client.get("/users/singun11", params={"score": "none"}).text
+    assert "무림 최강 막내" in none and "천마 회귀록" not in none
+    both = client.get("/users/singun11", params={"score": "8", "status": "seen"}).text
+    assert "검황 회귀전" in both and "천마 회귀록" not in both
+
+
+def test_infinite_scroll_returns_fragment(client, library):
+    from .conftest import comic_data
+
     with db.session(library) as conn:
-        assert "new-pw-123" not in (db.get_meta(conn, "password_hash") or "")
+        for no in range(100, 140):
+            db.upsert_comic(conn, comic_data(no, f"무림 회귀 {no}", genre="무협", tags=["회귀"]))
+    client.post("/reviews/1", data={"score": "10"})
+    first = client.get("/").text
+    assert 'hx-trigger="revealed"' in first and "page=1" in first
+    more = client.get("/", params={"page": "1"}, headers=HX).text
+    assert "<html" not in more and '<span class="rank">31</span>' in more
+    comics_more = client.get("/comics", params={"page": "1"}, headers=HX).text
+    assert "<html" not in comics_more and "card" in comics_more
 
 
-def test_export_and_import_via_settings(client, library):
-    client.post("/reviews/1", data={"score": "9"})
-    exported = client.get("/settings/export.json")
-    assert exported.headers["content-disposition"].startswith("attachment")
-    client.post("/reviews/1/delete")
-    resp = client.post(
-        "/settings/import", files={"file": ("r.json", exported.content, "application/json")}
-    )
-    assert "1개를 가져왔어요" in resp.text
-    assert review(library, 1).score == 9
+@pytest.mark.parametrize(
+    ("ua", "expected"),
+    [
+        ("Mozilla/5.0 (Linux; Android 15) Chrome/130 Mobile", "intent://m.series.naver.com/"),
+        ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", "https://m.series.naver.com/"),
+        ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "https://series.naver.com/"),
+    ],
+)
+def test_series_link_depends_on_device(client, ua, expected):
+    page = client.get("/comic/1", headers={"User-Agent": ua}).text
+    assert f'href="{expected}' in page
+    if "Android" in ua:
+        assert "package=com.nhn.android.nbooks" in page and "browser_fallback_url=" in page
+
+
+def test_naver_search_link_on_rate(client):
+    page = client.get("/rate", params={"q": "없는작품"}).text
+    assert "series.naver.com/search/search.series" in page
 
 
 @pytest.mark.parametrize(

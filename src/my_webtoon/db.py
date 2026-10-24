@@ -8,6 +8,7 @@ ORM 을 쓰지 않고 SQL 을 그대로 둔다 — 어떤 쿼리가 나가는지
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -42,10 +43,26 @@ def session(path: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    sql = resources.files("my_webtoon").joinpath("schema.sql").read_text(encoding="utf-8")
-    conn.executescript(sql)
-    migrate_ratings_v1(conn)
+def _schema_sql() -> str:
+    return resources.files("my_webtoon").joinpath("schema.sql").read_text(encoding="utf-8")
+
+
+def init_schema(
+    conn: sqlite3.Connection,
+    admin_username: str = "singun11",
+    admin_password_hash: str | None = None,
+) -> None:
+    """스키마를 만들고 옛 버전 데이터를 옮긴다. 몇 번 불러도 안전하다.
+
+    마이그레이션 순서 (오래된 것부터):
+      v1  ratings(kind, 1~5점)            → reviews
+      v2  reviews(product_no 단일 키)      → reviews(user_id, product_no) — 관리자 계정 소유로
+    """
+    conn.executescript(_schema_sql())
+    admin_id = ensure_admin(conn, admin_username, admin_password_hash)
+    _migrate_reviews_v2(conn, admin_id)
+    _migrate_ratings_v1(conn, admin_id)
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -244,19 +261,6 @@ def enqueue(conn: sqlite3.Connection, product_nos: Iterable[int], source: int | 
     return conn.total_changes - before
 
 
-def requeue(conn: sqlite3.Connection, product_nos: Iterable[int]) -> None:
-    """이미 수집한 작품을 다시 pending 으로 (재수집)."""
-    ts = now_iso()
-    conn.executemany(
-        """
-        INSERT INTO crawl_queue (product_no, state, discovered_at, updated_at)
-        VALUES (?, 'pending', ?, ?)
-        ON CONFLICT(product_no) DO UPDATE SET state='pending', attempts=0, updated_at=excluded.updated_at
-        """,
-        [(no, ts, ts) for no in product_nos],
-    )
-
-
 def next_pending(conn: sqlite3.Connection, limit: int) -> list[int]:
     rows = conn.execute(
         """
@@ -293,10 +297,14 @@ def replace_promos(conn: sqlite3.Connection, promos: dict[int, str]) -> None:
     )
 
 
-def queue_stats(conn: sqlite3.Connection) -> dict[str, int]:
+def queue_stats(conn: sqlite3.Connection, recrawl_after_days: int = 7) -> dict[str, int]:
     rows = conn.execute("SELECT state, COUNT(*) FROM crawl_queue GROUP BY state").fetchall()
     stats = {r[0]: r[1] for r in rows}
     stats["comics"] = conn.execute("SELECT COUNT(*) FROM comics").fetchone()[0]
+    cutoff = (datetime.now(UTC) - timedelta(days=recrawl_after_days)).isoformat(timespec="seconds")
+    stats["stale"] = conn.execute(
+        "SELECT COUNT(*) FROM comics WHERE crawled_at < ?", (cutoff,)
+    ).fetchone()[0]
     return stats
 
 
@@ -401,12 +409,14 @@ def _validate_score(name: str, value: int | None) -> int | None:
     return value
 
 
-def update_review(conn: sqlite3.Connection, product_no: int, **changes) -> Review | None:
+def update_review(
+    conn: sqlite3.Connection, user_id: int, product_no: int, **changes
+) -> Review | None:
     """주어진 칸만 바꾼다 (부분 업데이트). 값이 None 이면 그 칸을 비운다.
 
-    update_review(conn, 1, score=8)              → 점수만 8, 상태·메모는 그대로
-    update_review(conn, 1, status="seen")        → 상태만 '봤음', 점수는 그대로
-    update_review(conn, 1, aspects={"art": 9})   → 세부 점수 통째로 교체
+    update_review(conn, me, 1, score=8)              → 점수만 8, 상태·메모는 그대로
+    update_review(conn, me, 1, status="seen")        → 상태만 '봤음', 점수는 그대로
+    update_review(conn, me, 1, aspects={"art": 9})   → 세부 점수 통째로 교체
     모든 칸이 비면 행을 지우고 None 을 돌려준다.
     """
     unknown = set(changes) - {"status", "score", "aspects", "episodes_read", "memo"}
@@ -427,45 +437,54 @@ def update_review(conn: sqlite3.Connection, product_no: int, **changes) -> Revie
     if "memo" in changes:
         changes["memo"] = (changes["memo"] or "").strip()
 
-    current = get_review(conn, product_no) or Review(product_no, created_at=now_iso())
+    current = get_review(conn, user_id, product_no) or Review(product_no, created_at=now_iso())
     for key, value in changes.items():
         setattr(current, key, value)
     if current.is_empty():
-        delete_review(conn, product_no)
+        delete_review(conn, user_id, product_no)
         return None
 
     current.updated_at = now_iso()
     conn.execute(
         """
-        INSERT INTO reviews (product_no, status, score, aspects, episodes_read, memo,
+        INSERT INTO reviews (user_id, product_no, status, score, aspects, episodes_read, memo,
                              created_at, updated_at)
-        VALUES (:product_no, :status, :score, :aspects, :episodes_read, :memo,
+        VALUES (:user_id, :product_no, :status, :score, :aspects, :episodes_read, :memo,
                 :created_at, :updated_at)
-        ON CONFLICT(product_no) DO UPDATE SET
+        ON CONFLICT(user_id, product_no) DO UPDATE SET
             status=excluded.status, score=excluded.score, aspects=excluded.aspects,
             episodes_read=excluded.episodes_read, memo=excluded.memo,
             updated_at=excluded.updated_at
         """,
-        {**current.__dict__, "aspects": json.dumps(current.aspects, ensure_ascii=False)},
+        {
+            **current.__dict__,
+            "user_id": user_id,
+            "aspects": json.dumps(current.aspects, ensure_ascii=False),
+        },
     )
     return current
 
 
-def delete_review(conn: sqlite3.Connection, product_no: int) -> None:
-    conn.execute("DELETE FROM reviews WHERE product_no = ?", (product_no,))
+def delete_review(conn: sqlite3.Connection, user_id: int, product_no: int) -> None:
+    conn.execute("DELETE FROM reviews WHERE user_id = ? AND product_no = ?", (user_id, product_no))
 
 
-def get_review(conn: sqlite3.Connection, product_no: int) -> Review | None:
-    row = conn.execute("SELECT * FROM reviews WHERE product_no = ?", (product_no,)).fetchone()
+def get_review(conn: sqlite3.Connection, user_id: int, product_no: int) -> Review | None:
+    row = conn.execute(
+        "SELECT * FROM reviews WHERE user_id = ? AND product_no = ?", (user_id, product_no)
+    ).fetchone()
     return Review.from_row(row) if row else None
 
 
-def all_reviews(conn: sqlite3.Connection) -> dict[int, Review]:
-    rows = conn.execute("SELECT * FROM reviews").fetchall()
+def all_reviews(conn: sqlite3.Connection, user_id: int | None) -> dict[int, Review]:
+    """한 사용자의 평가 전부 {product_no: Review}. user_id 가 None(로그인 안 함)이면 빈 dict."""
+    if user_id is None:
+        return {}
+    rows = conn.execute("SELECT * FROM reviews WHERE user_id = ?", (user_id,)).fetchall()
     return {r["product_no"]: Review.from_row(r) for r in rows}
 
 
-def reviews_with_comics(conn: sqlite3.Connection) -> list[tuple[Review, Comic]]:
+def reviews_with_comics(conn: sqlite3.Connection, user_id: int) -> list[tuple[Review, Comic]]:
     rows = conn.execute(
         """
         SELECT r.status, r.score, r.aspects, r.episodes_read, r.memo,
@@ -474,8 +493,10 @@ def reviews_with_comics(conn: sqlite3.Connection) -> list[tuple[Review, Comic]]:
         FROM reviews r
         JOIN comics c ON c.product_no = r.product_no
         LEFT JOIN free_promos p ON p.product_no = c.product_no
+        WHERE r.user_id = ?
         ORDER BY r.updated_at DESC
-        """
+        """,
+        (user_id,),
     ).fetchall()
     return [
         (
@@ -495,8 +516,126 @@ def reviews_with_comics(conn: sqlite3.Connection) -> list[tuple[Review, Comic]]:
     ]
 
 
-def migrate_ratings_v1(conn: sqlite3.Connection) -> int:
-    """v1(ratings: kind + 1~5점) → v2(reviews). 옛 테이블은 ratings_v1_backup 으로 남겨 둔다.
+# ---------------------------------------------------------------------------
+# users
+# ---------------------------------------------------------------------------
+
+USERNAME_RE = r"^[a-z0-9_-]{3,32}$"
+
+
+@dataclass
+class User:
+    id: int
+    username: str
+    password_hash: str | None
+    is_admin: bool
+    session_epoch: int
+    created_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> User:
+        return cls(
+            id=row["id"],
+            username=row["username"],
+            password_hash=row["password_hash"],
+            is_admin=bool(row["is_admin"]),
+            session_epoch=row["session_epoch"],
+            created_at=row["created_at"],
+        )
+
+
+def create_user(
+    conn: sqlite3.Connection, username: str, password_hash: str | None, is_admin: bool = False
+) -> User:
+    username = username.strip().lower()
+    if not re.fullmatch(USERNAME_RE, username):
+        raise ValueError("아이디는 영문 소문자·숫자·-·_ 3~32자")
+    if get_user_by_name(conn, username):
+        raise ValueError(f"이미 있는 아이디: {username}")
+    cur = conn.execute(
+        "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)",
+        (username, password_hash, int(is_admin), now_iso()),
+    )
+    return get_user(conn, cur.lastrowid)
+
+
+def get_user(conn: sqlite3.Connection, user_id: int) -> User | None:
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return User.from_row(row) if row else None
+
+
+def get_user_by_name(conn: sqlite3.Connection, username: str) -> User | None:
+    row = conn.execute(
+        "SELECT * FROM users WHERE username = ?", (username.strip().lower(),)
+    ).fetchone()
+    return User.from_row(row) if row else None
+
+
+def list_users(conn: sqlite3.Connection) -> list[tuple[User, int]]:
+    """(사용자, 평가 수) 목록."""
+    rows = conn.execute(
+        """
+        SELECT u.*, COUNT(r.product_no) AS review_count
+        FROM users u LEFT JOIN reviews r ON r.user_id = u.id
+        GROUP BY u.id ORDER BY u.id
+        """
+    ).fetchall()
+    return [(User.from_row(r), r["review_count"]) for r in rows]
+
+
+def set_password_hash(conn: sqlite3.Connection, user_id: int, password_hash: str) -> int:
+    """비밀번호 해시를 바꾸고 세션 epoch 를 올린다. 새 epoch 를 돌려준다."""
+    conn.execute(
+        "UPDATE users SET password_hash = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+        (password_hash, user_id),
+    )
+    return get_user(conn, user_id).session_epoch
+
+
+def ensure_admin(conn: sqlite3.Connection, username: str, password_hash: str | None) -> int:
+    """사용자가 아무도 없으면 관리자 계정을 만든다. 관리자 id 를 돌려준다.
+
+    비밀번호는 (1) 예전 단일 사용자 시절 /settings 에서 바꾼 해시(meta.password_hash),
+    (2) 없으면 넘겨받은 해시(APP_PASSWORD), (3) 둘 다 없으면 NULL — 로컬 개발용 '열린 모드'.
+    관리자가 있는데 비밀번호가 NULL 이고 해시가 넘어오면 그때 채운다.
+    """
+    row = conn.execute(
+        "SELECT id, password_hash FROM users WHERE is_admin = 1 ORDER BY id"
+    ).fetchone()
+    if row:
+        if row["password_hash"] is None and password_hash:
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, row["id"])
+            )
+        return row["id"]
+    legacy = get_meta(conn, "password_hash")
+    return create_user(conn, username, legacy or password_hash, is_admin=True).id
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _migrate_reviews_v2(conn: sqlite3.Connection, admin_id: int) -> int:
+    """v2 reviews(user_id 없음) → v3 reviews(user_id, product_no). 옛 테이블은 reviews_v2_backup."""
+    if "user_id" in _columns(conn, "reviews"):
+        return 0
+    conn.execute("ALTER TABLE reviews RENAME TO reviews_v2_backup")
+    conn.executescript(_schema_sql())  # 새 모양의 reviews 를 만든다
+    cur = conn.execute(
+        """
+        INSERT INTO reviews (user_id, product_no, status, score, aspects, episodes_read, memo,
+                             created_at, updated_at)
+        SELECT ?, product_no, status, score, aspects, episodes_read, memo, created_at, updated_at
+        FROM reviews_v2_backup
+        """,
+        (admin_id,),
+    )
+    return cur.rowcount
+
+
+def _migrate_ratings_v1(conn: sqlite3.Connection, admin_id: int) -> int:
+    """v1(ratings: kind + 1~5점) → reviews. 옛 테이블은 ratings_v1_backup 으로 남겨 둔다.
 
     rated ★s → status='seen', score=s×2   (★5 → 10점, ★3 → 6점)
     seen     → status='seen'
@@ -513,13 +652,13 @@ def migrate_ratings_v1(conn: sqlite3.Connection) -> int:
         score = r["score"] * 2 if r["kind"] == "rated" and r["score"] else None
         conn.execute(
             """
-            INSERT OR IGNORE INTO reviews (product_no, status, score, memo, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO reviews (user_id, product_no, status, score, memo,
+                                           created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (r["product_no"], status, score, r["memo"], r["updated_at"], r["updated_at"]),
+            (admin_id, r["product_no"], status, score, r["memo"], r["updated_at"], r["updated_at"]),
         )
     conn.execute("ALTER TABLE ratings RENAME TO ratings_v1_backup")
-    conn.commit()
     return len(rows)
 
 

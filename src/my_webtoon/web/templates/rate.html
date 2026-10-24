@@ -20,7 +20,14 @@
 
 {% if q %}
   <h2>"{{ q }}" 검색 결과 {{ results | length }}개</h2>
-  {% if not results %}<p class="muted">아직 수집되지 않은 작품일 수 있어요. 위에서 링크로 가져와 보세요.</p>{% endif %}
+  {% if not results %}
+  <p class="muted">아직 수집되지 않은 작품일 수 있어요.</p>
+  {% endif %}
+  <p class="naver-search">
+    <a class="btn ghost" href="{{ naver_search_url }}" target="_blank" rel="noopener">네이버 시리즈에서 "{{ q }}" 검색 ↗</a>
+    <span class="muted small">찾은 작품의 주소를 복사해 위 "링크로 가져오기"에 붙여 넣으세요.
+      (네이버가 검색 페이지 자동 수집을 막아 두어서 서버가 대신 검색할 수는 없어요)</span>
+  </p>
   <div class="grid">
     {% for comic in results %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}
   </div>

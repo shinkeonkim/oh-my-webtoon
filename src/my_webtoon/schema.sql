@@ -40,17 +40,29 @@ CREATE TABLE IF NOT EXISTS free_promos (
     seen_at         TEXT    NOT NULL
 );
 
--- 내 평가. 작품당 하나. 모든 칸이 선택 사항이라 "봤음"만, "8점"만, 둘 다, 세부 점수까지 자유롭게 남긴다.
+-- 사용자. 수집 데이터(comics 등)는 모두가 공유하고, 평가·추천만 사용자별로 나뉜다.
+CREATE TABLE IF NOT EXISTS users (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    username        TEXT    NOT NULL UNIQUE,
+    password_hash   TEXT,                           -- PBKDF2 (web/auth.py). NULL 이면 로그인 불가
+    is_admin        INTEGER NOT NULL DEFAULT 0,     -- 사용자 추가·수집 실행·백업
+    session_epoch   INTEGER NOT NULL DEFAULT 0,     -- 비밀번호를 바꾸면 +1 → 다른 기기 세션 무효화
+    created_at      TEXT    NOT NULL
+);
+
+-- 평가. (사용자, 작품)당 하나. 모든 칸이 선택 사항이라 "봤음"만, "8점"만, 둘 다, 세부 점수까지 자유롭게 남긴다.
 CREATE TABLE IF NOT EXISTS reviews (
-    product_no      INTEGER PRIMARY KEY REFERENCES comics(product_no),
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_no      INTEGER NOT NULL REFERENCES comics(product_no),
     status          TEXT CHECK (status IN ('seen', 'watching', 'dropped', 'wish', 'dismissed')),
                                                     -- 봤음 / 보는 중 / 하차 / 보고 싶음 / 관심 없음
     score           INTEGER CHECK (score BETWEEN 0 AND 10),   -- 종합 점수 0~10
     aspects         TEXT    NOT NULL DEFAULT '{}',  -- JSON: {"story": 9, "art": 7} — 항목은 db.ASPECTS
     episodes_read   INTEGER CHECK (episodes_read >= 0),       -- 몇 화까지 봤는지
-    memo            TEXT    NOT NULL DEFAULT '',
+    memo            TEXT    NOT NULL DEFAULT '',    -- 본인에게만 보인다
     created_at      TEXT    NOT NULL,
-    updated_at      TEXT    NOT NULL
+    updated_at      TEXT    NOT NULL,
+    PRIMARY KEY (user_id, product_no)
 );
 
 -- 크롤러 실행 기록 (/crawl 화면에서 보여준다).

@@ -18,12 +18,12 @@
       <a href="/rate" class="{{ 'on' if path == '/rate' }}">평가하기</a>
       {%- endif %}
       <a href="/comics" class="{{ 'on' if path == '/comics' }}">작품 목록</a>
-      <a href="/me" class="{{ 'on' if path == '/me' }}">평가 기록</a>
+      <a href="{{ '/users/' ~ user.username if user else '/users' }}" class="{{ 'on' if path.startswith('/users') }}">평가 기록</a>
       {%- if authed %}
       <a href="/crawl" class="{{ 'on' if path == '/crawl' }}">수집</a>
       <a href="/settings" class="{{ 'on' if path == '/settings' }}">설정</a>
-      {%- if auth_enabled %}
-      <form method="post" action="/logout" class="inline"><button class="link">로그아웃</button></form>
+      {%- if can_logout %}
+      <form method="post" action="/logout" class="inline"><button class="link" title="로그아웃">{{ user.username }} · 로그아웃</button></form>
       {%- endif %}
       {%- else %}
       <a href="/login" class="{{ 'on' if path == '/login' }}">로그인</a>

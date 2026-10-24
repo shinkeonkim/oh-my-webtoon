@@ -1,0 +1,9 @@
+{#- 작품 목록 한 페이지 + 무한 스크롤 센티넬 (_rec_page.html 과 같은 방식). -#}
+{% from "_card.html" import card with context %}
+{% for comic in comics %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}
+{% if has_next %}
+<div class="sentinel" hx-get="/comics?{{ query_string }}{{ '&' if query_string }}page={{ page + 1 }}"
+     hx-trigger="revealed" hx-swap="outerHTML">
+  <a href="/comics?{{ query_string }}{{ '&' if query_string }}page={{ page + 1 }}">더 불러오는 중…</a>
+</div>
+{% endif %}

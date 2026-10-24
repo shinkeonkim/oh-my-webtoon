@@ -1,10 +1,12 @@
-"""비밀번호 로그인.
+"""사용자 로그인.
 
-- 처음에는 환경변수 APP_PASSWORD(쿠버네티스 시크릿)로 로그인한다.
-- /settings 에서 비밀번호를 바꾸면 PBKDF2 해시를 DB(meta.password_hash)에 저장하고,
-  그때부터는 DB 해시가 우선한다. 평문은 어디에도 남지 않는다.
-- 비밀번호를 바꾸면 session_epoch 를 올려서 다른 기기의 로그인 세션을 모두 끊는다.
-- 비밀번호를 잊었으면 meta.password_hash 행을 지우면 APP_PASSWORD 로 돌아간다 (docs/04_배포.md).
+- 사용자마다 아이디 + 비밀번호(PBKDF2 해시)를 가진다. 평문은 어디에도 남지 않는다.
+- 첫 관리자 계정(ADMIN_USERNAME, 기본 singun11)은 처음 뜰 때 APP_PASSWORD(쿠버네티스 시크릿)로 만든다.
+  관리자는 /settings 에서 다른 사용자를 추가할 수 있다 (공개 가입은 없다).
+- 세션에는 user_id 와 epoch 를 넣는다. 비밀번호를 바꾸면 그 사용자의 epoch 가 올라가서
+  다른 기기에 남아 있던 세션이 모두 끊긴다.
+- 비밀번호를 잊었으면: kubectl exec ... my-webtoon user set-password <아이디> (docs/04_배포.md)
+- 아무도 비밀번호가 없으면(로컬 개발) '열린 모드' — 로그인 없이 관리자로 동작한다.
 """
 
 from __future__ import annotations
@@ -26,7 +28,9 @@ def hash_password(password: str) -> str:
     return f"pbkdf2_sha256${ITERATIONS}${salt.hex()}${digest.hex()}"
 
 
-def verify_hash(password: str, stored: str) -> bool:
+def verify_hash(password: str, stored: str | None) -> bool:
+    if not stored:
+        return False
     try:
         algo, iterations, salt_hex, digest_hex = stored.split("$")
     except ValueError:
@@ -39,26 +43,38 @@ def verify_hash(password: str, stored: str) -> bool:
     return hmac.compare_digest(digest.hex(), digest_hex)
 
 
-def auth_enabled(conn: sqlite3.Connection, env_password: str | None) -> bool:
-    return bool(env_password) or db.get_meta(conn, "password_hash") is not None
-
-
-def check_password(conn: sqlite3.Connection, env_password: str | None, password: str) -> bool:
-    stored = db.get_meta(conn, "password_hash")
-    if stored:
-        return verify_hash(password, stored)
-    return bool(env_password) and hmac.compare_digest(password.encode(), env_password.encode())
-
-
-def change_password(conn: sqlite3.Connection, new_password: str) -> str:
-    """새 비밀번호 저장 + 세션 epoch 증가. 새 epoch 를 돌려준다 (지금 세션은 유지시키려고)."""
-    if len(new_password) < MIN_LENGTH:
+def validate_new_password(password: str) -> None:
+    if len(password) < MIN_LENGTH:
         raise ValueError(f"비밀번호는 {MIN_LENGTH}자 이상이어야 해요")
-    db.set_meta(conn, "password_hash", hash_password(new_password))
-    epoch = str(int(session_epoch(conn)) + 1)
-    db.set_meta(conn, "session_epoch", epoch)
-    return epoch
 
 
-def session_epoch(conn: sqlite3.Connection) -> str:
-    return db.get_meta(conn, "session_epoch") or "0"
+def authenticate(conn: sqlite3.Connection, username: str, password: str) -> db.User | None:
+    user = db.get_user_by_name(conn, username)
+    if user and verify_hash(password, user.password_hash):
+        return user
+    return None
+
+
+def open_mode(conn: sqlite3.Connection) -> bool:
+    """비밀번호가 있는 사용자가 하나도 없으면 로그인 없이 쓴다 (로컬 개발용)."""
+    row = conn.execute("SELECT 1 FROM users WHERE password_hash IS NOT NULL LIMIT 1").fetchone()
+    return row is None
+
+
+def current_user(conn: sqlite3.Connection, session: dict) -> db.User | None:
+    if open_mode(conn):
+        row = conn.execute("SELECT id FROM users WHERE is_admin = 1 ORDER BY id").fetchone()
+        return db.get_user(conn, row[0]) if row else None
+    user_id = session.get("user_id")
+    if user_id is None:
+        return None
+    user = db.get_user(conn, int(user_id))
+    if user is None or session.get("epoch") != user.session_epoch:
+        return None
+    return user
+
+
+def change_password(conn: sqlite3.Connection, user: db.User, new_password: str) -> int:
+    """새 비밀번호 저장 + 세션 epoch 증가. 새 epoch 를 돌려준다 (지금 세션은 유지시키려고)."""
+    validate_new_password(new_password)
+    return db.set_password_hash(conn, user.id, hash_password(new_password))

@@ -1,5 +1,8 @@
 {#- 작품 카드 매크로. rec 가 있으면 추천 순위/점수/이유도 같이 보여준다. -#}
-{% macro card(comic, review=None, rec=None, rank=None) %}
+{#- editable: 이 카드의 평가 위젯을 누를 수 있는지 (기본: 로그인했으면 내 평가). show_memo: 메모 보이기 -#}
+{% macro card(comic, review=None, rec=None, rank=None, editable=None, show_memo=None) %}
+{%- set editable = authed if editable is none else editable %}
+{%- set show_memo = editable if show_memo is none else show_memo %}
 <article class="card{% if rec and rec.stingy %} stingy{% endif %}">
   <a class="thumb" href="/comic/{{ comic.product_no }}">
     {% if rank %}<span class="rank">{{ rank }}</span>{% endif %}

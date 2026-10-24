@@ -18,7 +18,9 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     database_path: Path
-    # 비어 있으면 로그인 없이 쓴다 (로컬 개발용). 외부 공개 배포에서는 반드시 채운다.
+    # 첫 관리자 계정. 사용자가 아무도 없을 때 한 번만 이 아이디/비밀번호로 만든다.
+    # APP_PASSWORD 가 비어 있으면 로그인 없이 쓴다 (로컬 개발용). 외부 공개 배포에서는 반드시 채운다.
+    admin_username: str
     app_password: str | None
     session_secret: str
 
@@ -36,6 +38,7 @@ class Settings:
 def load_settings() -> Settings:
     return Settings(
         database_path=Path(os.environ.get("DATABASE_PATH", "data/my-webtoon.db")),
+        admin_username=os.environ.get("ADMIN_USERNAME", "singun11"),
         app_password=os.environ.get("APP_PASSWORD") or None,
         session_secret=os.environ.get("SESSION_SECRET") or secrets.token_hex(32),
         crawl_enabled=_env_bool("CRAWL_ENABLED", False),

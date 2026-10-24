@@ -5,7 +5,7 @@ SQLite 파일은 Longhorn 볼륨(복제본 1개)에 있다. 파드가 죽거나 
 
     BACKUP_DIR/
       my-webtoon-20261024T120000Z.db      전체 DB (sqlite3 backup API — 쓰는 중에도 일관된 사본)
-      reviews-20261024T120000Z.json       내 평가만 (사람이 읽을 수 있는 형태, /settings 에서 가져오기 가능)
+      reviews-20261024T120000Z.json       사용자별 평가 (사람이 읽을 수 있는 형태, /settings 에서 가져오기 가능)
 
 최근 KEEP 개만 남기고 오래된 건 지운다.
 """
@@ -24,10 +24,10 @@ log = logging.getLogger(__name__)
 KEEP = 14
 
 
-def export_reviews(conn: sqlite3.Connection) -> dict:
-    """내 평가를 JSON 으로. 제목도 같이 넣어 사람이 읽을 수 있게 한다 (가져올 땐 product_no 만 쓴다)."""
+def export_reviews(conn: sqlite3.Connection, user: db.User) -> dict:
+    """한 사용자의 평가를 JSON 으로. 제목도 같이 넣어 사람이 읽을 수 있게 한다 (가져올 땐 product_no 만 쓴다)."""
     items = []
-    for review, comic in db.reviews_with_comics(conn):
+    for review, comic in db.reviews_with_comics(conn, user.id):
         items.append(
             {
                 "product_no": review.product_no,
@@ -43,17 +43,25 @@ def export_reviews(conn: sqlite3.Connection) -> dict:
         )
     return {
         "format": "my-webtoon-reviews",
-        "version": 2,
+        "version": 3,
+        "username": user.username,
         "exported_at": db.now_iso(),
         "reviews": items,
     }
 
 
-def import_reviews(conn: sqlite3.Connection, payload: dict) -> tuple[int, list[int]]:
-    """export_reviews() 결과를 다시 넣는다. (가져온 개수, 아직 수집 안 돼서 건너뛴 product_no 들).
+def import_reviews(conn: sqlite3.Connection, user: db.User, payload: dict) -> tuple[int, list[int]]:
+    """export_reviews() 결과(또는 자동 백업 JSON)를 user 의 평가로 넣는다.
+    (가져온 개수, 아직 수집 안 돼서 건너뛴 product_no 들).
 
+    자동 백업 파일(여러 사용자)이면 같은 아이디의 몫만 가져온다.
     건너뛴 작품은 크롤링 큐에 넣어 두니, 수집된 뒤 한 번 더 가져오면 들어간다.
     """
+    if payload.get("format") == "my-webtoon-backup":
+        mine = [u for u in payload.get("users", []) if u.get("username") == user.username]
+        if not mine:
+            raise ValueError(f"백업 파일에 {user.username} 의 평가가 없어요")
+        payload = mine[0]
     if payload.get("format") != "my-webtoon-reviews":
         raise ValueError("my-webtoon 평가 내보내기 파일이 아니에요")
     imported, missing = 0, []
@@ -64,6 +72,7 @@ def import_reviews(conn: sqlite3.Connection, payload: dict) -> tuple[int, list[i
             continue
         db.update_review(
             conn,
+            user.id,
             no,
             status=item.get("status"),
             score=item.get("score"),
@@ -88,8 +97,13 @@ def run_backup(database_path: Path, backup_dir: Path, keep: int = KEEP) -> Path:
             src.backup(dst)
         finally:
             dst.close()
+        everyone = {
+            "format": "my-webtoon-backup",
+            "exported_at": db.now_iso(),
+            "users": [export_reviews(src, user) for user, _ in db.list_users(src)],
+        }
         (backup_dir / f"reviews-{stamp}.json").write_text(
-            json.dumps(export_reviews(src), ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(everyone, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         db.set_meta(src, "last_backup_at", db.now_iso())
 
