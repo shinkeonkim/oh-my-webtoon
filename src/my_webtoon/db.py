@@ -159,6 +159,48 @@ def upsert_comic(conn: sqlite3.Connection, data: dict) -> None:
     )
 
 
+EXCLUDED_GENRE_PREFIX = "제외 장르:"
+
+
+def delete_comic(conn: sqlite3.Connection, product_no: int) -> None:
+    conn.execute("DELETE FROM reviews WHERE product_no = ?", (product_no,))
+    conn.execute("DELETE FROM free_promos WHERE product_no = ?", (product_no,))
+    conn.execute("DELETE FROM comics WHERE product_no = ?", (product_no,))
+
+
+def apply_genre_exclusion(conn: sqlite3.Connection, excluded: frozenset[str]) -> tuple[int, int]:
+    """EXCLUDED_GENRES 설정을 DB 에 맞춘다. 앱/CLI 가 시작할 때 부른다 (몇 번 불러도 같다).
+
+    - 제외 장르 작품: 작품·평가·무료 이벤트를 지우고, 큐에는 'skipped / 제외 장르:BL' 로 남긴다
+      → 다시 수집하지 않는다.
+    - 플래그에서 빠진 장르: 그 이유로 건너뛰었던 큐 항목을 pending 으로 되돌린다 → 다음 수집에서 다시 가져온다.
+    (삭제된 개수, 되살린 개수) 를 돌려준다.
+    """
+    removed = 0
+    for genre in excluded:
+        rows = conn.execute("SELECT product_no FROM comics WHERE genre = ?", (genre,)).fetchall()
+        for (no,) in rows:
+            delete_comic(conn, no)
+            enqueue(conn, [no], None)
+            mark_crawled(conn, no, "skipped", f"{EXCLUDED_GENRE_PREFIX}{genre}")
+        removed += len(rows)
+
+    restored = 0
+    rows = conn.execute(
+        "SELECT product_no, last_error FROM crawl_queue WHERE state = 'skipped' AND last_error LIKE ?",
+        (f"{EXCLUDED_GENRE_PREFIX}%",),
+    ).fetchall()
+    for no, reason in rows:
+        if reason.removeprefix(EXCLUDED_GENRE_PREFIX) not in excluded:
+            conn.execute(
+                "UPDATE crawl_queue SET state = 'pending', attempts = 0, last_error = NULL WHERE product_no = ?",
+                (no,),
+            )
+            restored += 1
+    conn.commit()
+    return removed, restored
+
+
 def get_comic(conn: sqlite3.Connection, product_no: int) -> Comic | None:
     row = conn.execute(_COMIC_SELECT + " WHERE c.product_no = ?", (product_no,)).fetchone()
     return Comic.from_row(row) if row else None

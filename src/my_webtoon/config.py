@@ -31,6 +31,9 @@ class Settings:
     crawl_delay_seconds: float  # 요청 사이 간격 (네이버에 부담을 주지 않도록)
     recrawl_after_days: int  # 이 기간이 지난 작품은 다시 수집 (무료 회차 수가 바뀌므로)
     user_agent: str
+    # 수집하지 않을 장르 (네이버 장르명). 기본 BL. 비우면 모든 장르를 모은다 — 지금은 개인용이라
+    # 빼 두지만 나중에 서비스로 열 때 이 값만 바꾸면 된다. 바꾸면 다음 시작 때 자동으로 정리/재수집한다.
+    excluded_genres: frozenset[str]
     # 하루 한 번 DB 사본을 둘 디렉터리 (다른 디스크 권장). 비어 있으면 자동 백업을 안 한다.
     backup_dir: Path | None
 
@@ -50,6 +53,9 @@ def load_settings() -> Settings:
             "CRAWL_USER_AGENT",
             "Mozilla/5.0 (compatible; my-webtoon-personal-recommender/0.1; "
             "+https://my-webtoon.shinkeonkim.com)",
+        ),
+        excluded_genres=frozenset(
+            g.strip() for g in os.environ.get("EXCLUDED_GENRES", "BL").split(",") if g.strip()
         ),
         backup_dir=Path(os.environ["BACKUP_DIR"]) if os.environ.get("BACKUP_DIR") else None,
     )

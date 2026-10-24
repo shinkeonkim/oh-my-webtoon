@@ -46,6 +46,7 @@ def main(argv: list[str] | None = None) -> None:
     settings = load_settings()
     with db.session(settings.database_path) as conn:
         db.init_schema(conn, settings.admin_username, _initial_admin_hash(settings))
+        db.apply_genre_exclusion(conn, settings.excluded_genres)
 
     if args.command == "serve":
         import uvicorn
@@ -69,12 +70,18 @@ def main(argv: list[str] | None = None) -> None:
             batch_size=args.limit or settings.crawl_batch_size,
             recrawl_after_days=settings.recrawl_after_days,
             force_seeds=args.seeds,
+            excluded_genres=settings.excluded_genres,
         )
         print(result.summary())
     elif args.command == "import":
         from .crawler.runner import import_one
 
-        data = import_one(settings.database_path, args.product_no, user_agent=settings.user_agent)
+        data = import_one(
+            settings.database_path,
+            args.product_no,
+            user_agent=settings.user_agent,
+            excluded_genres=settings.excluded_genres,
+        )
         print(
             f"{data['title']} — {data['free_episodes']}/{data['total_episodes']}{data['unit']} 무료"
         )

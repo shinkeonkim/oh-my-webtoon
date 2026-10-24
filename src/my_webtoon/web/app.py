@@ -72,6 +72,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     with db.session(settings.database_path) as conn:
         initial_hash = auth.hash_password(settings.app_password) if settings.app_password else None
         db.init_schema(conn, settings.admin_username, initial_hash)
+        removed, restored = db.apply_genre_exclusion(conn, settings.excluded_genres)
+        if removed or restored:
+            log.info(
+                "제외 장르 %s: 작품 %d개 삭제, %d개 재수집 예약",
+                sorted(settings.excluded_genres),
+                removed,
+                restored,
+            )
 
     def backup_loop() -> None:
         while not stop_backup.is_set():
@@ -228,7 +236,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if db.get_comic(conn, product_no) is None:
             try:
                 runner.import_one(
-                    settings.database_path, product_no, user_agent=settings.user_agent
+                    settings.database_path,
+                    product_no,
+                    user_agent=settings.user_agent,
+                    excluded_genres=settings.excluded_genres,
+                )
+            except runner.parser.ExcludedGenre as exc:
+                return RedirectResponse(
+                    f"/rate?error={exc} 장르는 수집하지 않아요", status_code=303
                 )
             except runner.parser.LoginRequired:
                 return RedirectResponse(

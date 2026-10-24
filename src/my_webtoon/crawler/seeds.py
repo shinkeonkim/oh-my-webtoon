@@ -11,16 +11,18 @@ robots.txt 가 허용하는 페이지 중 작품 링크가 많이 모여 있는 
 from __future__ import annotations
 
 RANKING_TYPES = ["DAILY", "WEEKLY", "MONTHLY"]
-# 전체 + 네이버 시리즈 코믹스 장르 코드 (BL, 무협, 소년, 드라마, 순정)
-CATEGORY_CODES = ["ALL", "107", "88", "90", "93", "99"]
+# 네이버 시리즈 코믹스 장르 코드 (TOP100 의 categoryCode)
+GENRE_CODES = {"BL": "107", "무협": "88", "소년": "90", "드라마": "93", "순정": "99"}
 TOP100_PAGES = 5
 FREE_LIST_PAGES = 10
 
 
-def seed_paths() -> list[str]:
+def seed_paths(excluded_genres: frozenset[str] = frozenset()) -> list[str]:
+    """제외 장르의 장르별 TOP100 은 아예 열지 않는다 (전체 TOP100 에 섞여 나오는 건 상세에서 거른다)."""
+    categories = ["ALL"] + [code for g, code in GENRE_CODES.items() if g not in excluded_genres]
     paths = ["/comic/home.series"]
     for ranking in RANKING_TYPES:
-        for category in CATEGORY_CODES:
+        for category in categories:
             for page in range(1, TOP100_PAGES + 1):
                 paths.append(
                     f"/comic/top100List.series?rankingTypeCode={ranking}"

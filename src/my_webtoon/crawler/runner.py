@@ -44,22 +44,31 @@ class RunResult:
         )
 
 
-def fetch_one(client: PoliteClient, product_no: int) -> tuple[dict, set[int]]:
+def fetch_one(
+    client: PoliteClient, product_no: int, excluded_genres: frozenset[str] = frozenset()
+) -> tuple[dict, set[int]]:
     """상세 페이지 하나 → (작품 dict, 페이지 안의 다른 작품 번호들)."""
     page = client.get(f"/comic/detail.series?productNo={product_no}")
     if parser.is_login_page(page.url, page.text):
         raise parser.LoginRequired(product_no)
     if page.status != 200:
         raise RuntimeError(f"HTTP {page.status}")
-    return parser.parse_detail(product_no, page.text), parser.extract_product_links(
-        page.text, exclude=product_no
-    )
+    data = parser.parse_detail(product_no, page.text)
+    if data["genre"] in excluded_genres:
+        raise parser.ExcludedGenre(data["genre"])
+    return data, parser.extract_product_links(page.text, exclude=product_no)
 
 
-def refresh_seeds(conn, client: PoliteClient, result: RunResult, stop: threading.Event) -> None:
+def refresh_seeds(
+    conn,
+    client: PoliteClient,
+    result: RunResult,
+    stop: threading.Event,
+    excluded_genres: frozenset[str] = frozenset(),
+) -> None:
     promos: dict[int, str] = {}
     free_paths = set(seeds.free_list_paths())
-    for path in seeds.seed_paths():
+    for path in seeds.seed_paths(excluded_genres):
         if stop.is_set():
             return
         try:
@@ -103,6 +112,7 @@ def run_once(
     recrawl_after_days: int,
     force_seeds: bool = False,
     stop: threading.Event | None = None,
+    excluded_genres: frozenset[str] = frozenset(),
 ) -> RunResult:
     stop = stop or threading.Event()
     result = RunResult()
@@ -111,7 +121,7 @@ def run_once(
         try:
             if force_seeds or _seeds_due(conn):
                 log.info("시드 갱신 중")
-                refresh_seeds(conn, client, result, stop)
+                refresh_seeds(conn, client, result, stop, excluded_genres)
 
             stale = db.stale_product_nos(conn, recrawl_after_days, batch_size)
             plan = plan_batch(stale, db.next_pending(conn, batch_size), batch_size)
@@ -122,9 +132,14 @@ def run_once(
                     result.notes.append("중간에 멈춤")
                     break
                 try:
-                    data, links = fetch_one(client, product_no)
+                    data, links = fetch_one(client, product_no, excluded_genres)
                 except parser.LoginRequired:
                     db.mark_crawled(conn, product_no, "skipped", "로그인 필요(19금)")
+                    result.skipped += 1
+                except parser.ExcludedGenre as exc:
+                    # 지웠다가 플래그를 풀면 다시 가져올 수 있게 이유를 정해진 모양으로 남긴다
+                    db.mark_crawled(conn, product_no, "skipped", f"{db.EXCLUDED_GENRE_PREFIX}{exc}")
+                    db.delete_comic(conn, product_no)  # 갱신하다 장르가 바뀐 경우
                     result.skipped += 1
                 except Exception as exc:  # noqa: BLE001 — 한 작품 실패로 전체를 멈추지 않는다
                     log.warning("productNo=%s 실패: %s", product_no, exc)
@@ -151,10 +166,16 @@ def run_once(
     return result
 
 
-def import_one(database_path: Path, product_no: int, *, user_agent: str) -> dict:
+def import_one(
+    database_path: Path,
+    product_no: int,
+    *,
+    user_agent: str,
+    excluded_genres: frozenset[str] = frozenset(),
+) -> dict:
     """화면에서 'URL 로 추가' 할 때 쓰는 단건 수집. 연관 작품도 큐에 넣어 둔다."""
     with db.session(database_path) as conn, PoliteClient(user_agent, delay_seconds=0) as client:
-        data, links = fetch_one(client, product_no)
+        data, links = fetch_one(client, product_no, excluded_genres)
         db.upsert_comic(conn, data)
         db.enqueue(conn, [product_no], None)
         db.mark_crawled(conn, product_no, "done")
@@ -213,6 +234,7 @@ class BackgroundCrawler:
                 batch_size=s.crawl_batch_size,
                 recrawl_after_days=s.recrawl_after_days,
                 stop=self._stop,
+                excluded_genres=s.excluded_genres,
             )
             if self.on_finish:
                 self.on_finish()

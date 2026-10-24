@@ -37,6 +37,7 @@ spec:
             - { name: CRAWL_INTERVAL_HOURS, value: "6" }
             - { name: CRAWL_BATCH_SIZE, value: "300" }
             - { name: CRAWL_DELAY_SECONDS, value: "1.5" }
+            - { name: EXCLUDED_GENRES, value: "BL" } # 쉼표로 여러 개. 비우면 전 장르 수집
             - { name: BACKUP_DIR, value: /backup }
             - { name: HOME, value: /tmp }
           envFrom:
