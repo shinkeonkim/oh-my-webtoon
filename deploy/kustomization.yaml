@@ -4,14 +4,15 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: my-webtoon
 resources:
-  - namespace.yaml
-  - pvc.yaml
-  - deployment.yaml
-  - service.yaml
-  - ingress.yaml
+- namespace.yaml
+- pvc.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
 labels:
-  - pairs:
-      app.kubernetes.io/part-of: my-webtoon
+- pairs:
+    app.kubernetes.io/part-of: my-webtoon
 images:
-  - name: ghcr.io/shinkeonkim/oh-my-webtoon
-    newTag: latest # release.yml 이 main push 마다 sha-xxxxxxx 로 바꿔 커밋한다
+- name: ghcr.io/shinkeonkim/oh-my-webtoon
+  newName: ghcr.io/shinkeonkim/oh-my-webtoon
+  newTag: sha-b48f1f2
