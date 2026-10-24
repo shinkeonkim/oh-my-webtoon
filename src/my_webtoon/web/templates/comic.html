@@ -18,9 +18,9 @@
     </div>
     {% if comic.tags %}<p class="detail__tags">{% for t in comic.tags %}<span>#{{ t }}</span>{% endfor %}</p>{% endif %}
     <p class="detail__synopsis">{{ comic.synopsis }}</p>
-    <p class="card__math">보정 배수 {{ '%.2f' % boost }}{{ ' · 유료 위주 작품' if stingy }} · {{ comic.crawled_at[:10] }} 수집</p>
+    <p class="card__math">보정 배수 {{ '%.2f' % boost }}{{ ' · 유료 위주 작품' if stingy }} · {{ comic.crawled_at | kst('%Y-%m-%d %H:%M') }} 수집</p>
     {% if authed %}<div class="detail__review">{% set editable = true %}{% set show_memo = true %}{% include "_review.html" %}</div>{% endif %}
-    <p class="row">{{ ui.button('네이버 시리즈에서 보기', 'primary', href=series_link(request, comic), attrs='target="_blank" rel="noopener"', icon_name='external') }}</p>
+    <p class="row">{{ ui.button('네이버 시리즈에서 보기', 'primary', href=series_link(request, comic), attrs=('' if is_mobile(request) else 'target="_blank" rel="noopener"'), icon_name='external') }}</p>
   </div>
 </section>
 

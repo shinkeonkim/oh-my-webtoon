@@ -136,3 +136,48 @@ def test_plan_batch_splits_refresh_and_discovery():
     assert plan_batch([1, 2, 3, 4], [10], 4) == [1, 2, 10, 3]  # 발견이 모자라면 갱신이 채운다
     assert plan_batch([1], [10, 11, 12, 13], 4) == [1, 10, 11, 12]  # 갱신이 모자라면 발견이 채운다
     assert plan_batch([], [], 4) == []
+
+
+def test_work_key_groups_editions():
+    from my_webtoon.recommender.works import work_key
+
+    assert work_key("나루토 [단행본]") == work_key("나루토")
+    assert work_key("붉은매2 [단행본]") == work_key("붉은 매2")
+    assert work_key("천하제일인[독점]") == work_key("천하제일인")
+    assert work_key("나 혼자만 레벨업") != work_key("나 혼자 만렙 뉴비")
+
+
+def test_editions_are_grouped_and_reviewed_work_is_excluded(library):
+    from .conftest import comic_data
+
+    with db.session(library) as conn:
+        db.upsert_comic(conn, comic_data(60, "검황 회귀전 [단행본]", genre="무협", tags=["회귀"],
+                                         synopsis="검황이 회귀하여 무림에 복수한다", unit="권"))  # fmt: skip
+        db.upsert_comic(conn, comic_data(61, "천마 회귀록 [단행본]", genre="무협", tags=["회귀"],
+                                         synopsis="천마가 회귀해 무림을 평정한다", unit="권"))  # fmt: skip
+        db.update_review(conn, ME, 1, score=10)  # '천마 회귀록' 평가
+        recs = Engine().recommend(conn, ME, ScoringOptions(sink_stingy=False))
+    names = titles(recs)
+    assert "천마 회귀록 [단행본]" not in names  # 평가한 작품의 다른 판본은 빠진다
+    assert sum(1 for t in names if t.startswith("검황 회귀전")) == 1  # 판본은 하나만
+    assert next(r for r in recs if r.comic.title.startswith("검황 회귀전")).variants == 1
+
+
+def test_snapshot_keeps_pages_stable_when_ratings_change(library):
+    from .conftest import comic_data
+
+    engine = Engine()
+    with db.session(library) as conn:
+        for no in range(100, 140):
+            db.upsert_comic(conn, comic_data(no, f"무림 회귀 {no}", genre="무협", tags=["회귀"],
+                                             synopsis=f"회귀 무림 {no}"))  # fmt: skip
+        db.update_review(conn, ME, 1, score=10)
+        first, snap = engine.recommend_page(conn, ME, ScoringOptions(), offset=0, limit=10)
+        db.update_review(
+            conn, ME, first[0].comic.product_no, score=0
+        )  # 스크롤 중에 평가 → 취향이 바뀜
+        second, same = engine.recommend_page(conn, ME, ScoringOptions(), 10, 10, snapshot=snap)
+        assert same == snap
+        assert not {r.comic.product_no for r in first} & {r.comic.product_no for r in second}
+        _, other = engine.recommend_page(conn, 999, ScoringOptions(), 10, 10, snapshot=snap)
+        assert other != snap  # 남의 스냅숏은 못 쓴다

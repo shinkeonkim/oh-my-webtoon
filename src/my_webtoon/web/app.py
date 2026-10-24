@@ -30,6 +30,7 @@ import re
 import threading
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
@@ -122,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         free_tone=free_tone,
         episodes_label=episodes_label,
         series_link=series_link,
+        is_mobile=is_mobile,
         format_stars=format_stars,
         reason_label=reason_label,
         static_version=static_version(HERE / "static"),
@@ -130,6 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         SCORES=list(db.SCORE_RANGE),
     )
     templates.env.filters.update(
+        kst=kst,
         star_option=lambda v: (v, f"★{format_stars(v)}"),  # 셀렉트용 (값, 라벨)
         pair=lambda v: (v, v),
         sort_option=lambda item: (item[0], item[1][0]),
@@ -200,10 +203,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # -- 추천 -----------------------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request, conn=Depends(get_conn), page: int = 0):
+    def index(request: Request, conn=Depends(get_conn), page: int = 0, snap: str = ""):
         user = me(request)
         opts = options_from_query(request)
-        recs = engine.recommend(conn, user.id, opts, limit=PER_PAGE, offset=page * PER_PAGE)
+        # snap: 첫 페이지에서 만든 순위 스냅숏. 다음 페이지는 같은 순위에서 이어서 잘라 중복·누락이 없다.
+        recs, snap = engine.recommend_page(
+            conn, user.id, opts, offset=page * PER_PAGE, limit=PER_PAGE, snapshot=snap or None
+        )
         ctx = dict(
             recs=recs,
             reviews=db.all_reviews(conn, user.id),
@@ -211,7 +217,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             page=page,
             rank_offset=page * PER_PAGE,
             has_next=len(recs) == PER_PAGE,
-            query_string=_query_without(request, "page"),
+            query_string=_query_without(request, "page", "snap"),
+            snap=snap,
         )
         if request.headers.get("HX-Request") and page > 0:
             return render(request, "_rec_page.html", **ctx)  # 무한 스크롤: 다음 30개 + 다음 센티넬
@@ -633,8 +640,8 @@ def options_from_query(request: Request) -> ScoringOptions:
     )
 
 
-def _query_without(request: Request, key: str) -> str:
-    return urlencode([(k, v) for k, v in request.query_params.multi_items() if k != key])
+def _query_without(request: Request, *keys: str) -> str:
+    return urlencode([(k, v) for k, v in request.query_params.multi_items() if k not in keys])
 
 
 def parse_product_no(text: str) -> int | None:
@@ -643,29 +650,37 @@ def parse_product_no(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-SERIES_APP_PACKAGE = "com.nhn.android.nbooks"  # 네이버 시리즈 안드로이드 앱
+MOBILE_UA = re.compile(r"Android|iPhone|iPad|iPod|Mobile")
+
+
+def is_mobile(request: Request) -> bool:
+    return bool(MOBILE_UA.search(request.headers.get("user-agent", "")))
 
 
 def series_link(request: Request, comic) -> str:
-    """'네이버 시리즈에서 보기' 링크. 기기에 따라 다르게:
+    """'네이버 시리즈에서 보기' 링크.
 
-    - 안드로이드: 시리즈 앱을 지정한 intent:// 링크. 앱이 이 주소를 받으면 앱에서 열리고,
-      아니면(또는 앱이 없으면) browser_fallback_url 의 모바일 웹으로 간다.
-    - 아이폰 등 다른 모바일: 모바일 웹 상세 (그 페이지의 '앱으로 보기' 버튼이 앱을 연다).
-      시리즈 앱이 유니버설 링크를 등록해 두지 않아서 바로 앱으로 보낼 확실한 방법이 없다.
-    - 데스크톱: PC 웹.
+    모바일이면 모바일 웹 상세(m.series.naver.com)로 보낸다. 그 페이지가 열리면서 네이버 쪽 스크립트가
+    시리즈 앱을 바로 띄운다 (앱이 없으면 웹으로 남는다) — 실제 휴대폰에서 확인한 동작이라 따로 앱 링크를
+    만들 필요가 없다. 데스크톱이면 PC 웹.
     """
-    ua = request.headers.get("user-agent", "")
     path = f"comic/detail.series?productNo={comic.product_no}"
-    mobile_url = f"https://m.series.naver.com/{path}"
-    if "Android" in ua:
-        return (
-            f"intent://m.series.naver.com/{path}#Intent;scheme=https;package={SERIES_APP_PACKAGE};"
-            f"S.browser_fallback_url={quote(mobile_url, safe='')};end"
-        )
-    if re.search(r"iPhone|iPad|Mobile", ua):
-        return mobile_url
+    if is_mobile(request):
+        return f"https://m.series.naver.com/{path}"
     return f"https://series.naver.com/{path}"
+
+
+KST = timezone(timedelta(hours=9))  # 한국은 서머타임이 없어 고정 +9 로 충분하다
+
+
+def kst(iso: str | None, fmt: str = "%m-%d %H:%M") -> str:
+    """DB 의 UTC ISO 시각 → 한국 시각 문자열. 템플릿에서 {{ r.started_at | kst }}."""
+    if not iso:
+        return ""
+    when = datetime.fromisoformat(iso)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return when.astimezone(KST).strftime(fmt)
 
 
 def format_stars(score) -> str:

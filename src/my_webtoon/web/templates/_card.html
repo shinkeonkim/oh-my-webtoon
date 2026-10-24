@@ -17,6 +17,7 @@
       {%- if comic.total_episodes %}{{ ui.badge(episodes_label(comic)) }}{% endif %}
       {%- if comic.naver_rating %}{{ ui.badge('%.1f' % comic.naver_rating, icon_name='star') }}{% endif %}
       {%- if comic.promo_label %}{{ ui.badge(comic.promo_label, 'promo', icon_name='clock') }}{% endif %}
+      {%- if rec and rec.variants %}{{ ui.badge('다른 판본 ' ~ rec.variants ~ '개') }}{% endif %}
     </div>
     {%- if rec %}
     <p class="card__why">

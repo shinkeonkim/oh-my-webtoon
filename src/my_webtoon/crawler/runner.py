@@ -219,9 +219,13 @@ class BackgroundCrawler:
         self._thread = threading.Thread(target=self._loop, name="crawler", daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 25) -> None:
+        """멈추라고 알리고, 지금 가져오던 작품까지 마무리하며 실행 기록(crawl_runs)을 남길 시간을 준다.
+        (파드 종료 유예 40초 안에 끝나도록 25초까지만 기다린다)"""
         self._stop.set()
         self._wake.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout)
 
     def trigger(self) -> None:
         self._wake.set()

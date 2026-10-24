@@ -45,7 +45,7 @@
   <ul class="list mb-4">
     {% for u, count in users %}
     <li><a href="/users/{{ u.username }}">{{ u.username }}</a>
-        <span class="muted small">{{ '관리자 · ' if u.is_admin }}{{ '데모 · ' if u.is_demo }}평가 {{ count }}개 · {{ u.created_at[:10] }}</span></li>
+        <span class="muted small">{{ '관리자 · ' if u.is_admin }}{{ '데모 · ' if u.is_demo }}평가 {{ count }}개 · {{ u.created_at | kst('%Y-%m-%d') }}</span></li>
     {% endfor %}
   </ul>
   <form class="form-grid" method="post" action="/settings/users">
@@ -59,7 +59,7 @@
 <section class="panel">
   <h2>자동 백업</h2>
   {% if backup_dir %}
-  <p class="panel__desc">하루 한 번 <code>{{ backup_dir }}</code>(Mac NFS)에 DB 전체와 사용자별 평가 JSON 을 저장해요. 최근 14개 보관 · 마지막 {{ (last_backup_at or '아직')[:16] | replace('T', ' ') }}</p>
+  <p class="panel__desc">하루 한 번 <code>{{ backup_dir }}</code>(Mac NFS)에 DB 전체와 사용자별 평가 JSON 을 저장해요. 최근 14개 보관 · 마지막 {{ last_backup_at | kst('%Y-%m-%d %H:%M') if last_backup_at else '아직' }}</p>
   <form method="post" action="/settings/backup">{{ ui.button('지금 백업', 'secondary') }}</form>
   {% else %}
   <p class="panel__desc">BACKUP_DIR 이 설정돼 있지 않아 자동 백업이 꺼져 있어요.</p>

@@ -3,9 +3,10 @@
 {% from "_card.html" import card with context %}
 {% for rec in recs %}{{ card(rec.comic, reviews.get(rec.comic.product_no), rec, rank_offset + loop.index) }}{% endfor %}
 {% if has_next %}
-<div class="sentinel" hx-get="/?{{ query_string }}{{ '&' if query_string }}page={{ page + 1 }}"
+{%- set next_url = '/?' ~ query_string ~ ('&' if query_string) ~ 'snap=' ~ snap ~ '&page=' ~ (page + 1) %}
+<div class="sentinel" hx-get="{{ next_url }}"
      hx-trigger="revealed" hx-swap="outerHTML">
-  <a href="/?{{ query_string }}{{ '&' if query_string }}page={{ page + 1 }}">더 불러오는 중…</a>
+  <a href="{{ next_url }}">더 불러오는 중…</a>
 </div>
 {% elif page > 0 %}
 <p class="sentinel muted">추천을 끝까지 다 봤어요.</p>

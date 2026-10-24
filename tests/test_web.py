@@ -220,7 +220,7 @@ def test_infinite_scroll_returns_fragment(client, library):
 @pytest.mark.parametrize(
     ("ua", "expected"),
     [
-        ("Mozilla/5.0 (Linux; Android 15) Chrome/130 Mobile", "intent://m.series.naver.com/"),
+        ("Mozilla/5.0 (Linux; Android 15) Chrome/130 Mobile", "https://m.series.naver.com/"),
         ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", "https://m.series.naver.com/"),
         ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "https://series.naver.com/"),
     ],
@@ -228,8 +228,8 @@ def test_infinite_scroll_returns_fragment(client, library):
 def test_series_link_depends_on_device(client, ua, expected):
     page = client.get("/comic/1", headers={"User-Agent": ua}).text
     assert f'href="{expected}' in page
-    if "Android" in ua:
-        assert "package=com.nhn.android.nbooks" in page and "browser_fallback_url=" in page
+    if "Mobile" in ua or "iPhone" in ua:
+        assert 'target="_blank"' not in page.split("네이버 시리즈에서 보기")[0].rsplit("<a", 1)[-1]
 
 
 def test_naver_search_link_on_rate(client):
@@ -298,3 +298,28 @@ def test_mobile_tabbar_and_favicon(client):
     tabbar = page.split('class="tabbar"', 1)[1].split("</nav>", 1)[0]
     assert all(label in tabbar for label in ("추천", "평가하기", "작품", "평가 기록", "더보기"))
     assert "수집 현황" in client.get("/settings").text  # 탭바에 없는 메뉴는 '더보기'(설정)에서
+
+
+def test_kst_filter_and_mobile_link():
+    from my_webtoon.web.app import kst
+
+    assert kst("2026-10-24T14:14:00+00:00") == "10-24 23:14"
+    assert kst("2026-10-24T16:30:00+00:00", "%Y-%m-%d %H:%M") == "2026-10-25 01:30"
+    assert kst(None) == ""
+
+
+def test_infinite_scroll_carries_snapshot(client, library):
+    from .conftest import comic_data
+
+    with db.session(library) as conn:
+        for no in range(100, 140):
+            db.upsert_comic(conn, comic_data(no, f"무림 회귀 {no}", genre="무협", tags=["회귀"]))
+    client.post("/reviews/1", data={"score": "10"})
+    first = client.get("/").text
+    import re
+
+    snap = re.search(r"snap=([\w-]+)&amp;page=1", first).group(1)
+    shown = set(re.findall(r'href="/comic/(\d+)"', first))
+    client.post("/reviews/100", data={"score": "0"})  # 스크롤 중 평가
+    more = client.get("/", params={"snap": snap, "page": "1"}, headers=HX).text
+    assert not shown & set(re.findall(r'href="/comic/(\d+)"', more))
