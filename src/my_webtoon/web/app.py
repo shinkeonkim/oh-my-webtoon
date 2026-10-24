@@ -169,14 +169,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(403, "관리자만 할 수 있어요")
         return user
 
-    def forbid_demo(request: Request, what: str) -> RedirectResponse | None:
+    def forbid_demo(request: Request, back_to: str, message: str) -> RedirectResponse | None:
         """데모 계정이면 막는다. 막았으면 돌려보낼 응답을, 아니면 None."""
         user = request.state.user
         if user is not None and user.is_demo:
-            target = "/rate" if what == "링크로 가져오기" else "/settings"
-            return RedirectResponse(
-                f"{target}?error=데모 계정은 {what}를 할 수 없어요", status_code=303
-            )
+            return RedirectResponse(f"{back_to}?error={message}", status_code=303)
         return None
 
     def my_id(request: Request) -> int | None:
@@ -241,7 +238,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/import")
     def import_comic(request: Request, url: str = Form(...), conn=Depends(get_conn)):
-        if blocked := forbid_demo(request, "링크로 가져오기"):
+        if blocked := forbid_demo(request, "/rate", "데모 계정에서는 링크로 가져올 수 없어요"):
             return blocked
         product_no = parse_product_no(url)
         if product_no is None:
@@ -434,7 +431,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         conn=Depends(get_conn),
     ):
         user = me(request)
-        if blocked := forbid_demo(request, "비밀번호 변경"):
+        if blocked := forbid_demo(request, "/settings", "데모 계정은 비밀번호를 바꿀 수 없어요"):
             return blocked
         if user.password_hash and not auth.verify_hash(current, user.password_hash):
             return RedirectResponse("/settings?error=지금 비밀번호가 달라요", status_code=303)
@@ -476,7 +473,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/settings/import")
     async def settings_import(request: Request, file: UploadFile, conn=Depends(get_conn)):
-        if blocked := forbid_demo(request, "평가 가져오기"):
+        if blocked := forbid_demo(request, "/settings", "데모 계정에서는 평가를 가져올 수 없어요"):
             return blocked
         try:
             payload = json.loads(await file.read())
