@@ -1,17 +1,17 @@
-{#- 빠른 평가 한 장. 버튼을 누르면 서버가 저장하고 '다음 장'으로 이 조각 전체(#quick)를 바꾼다.
-    done: 이번에 몇 장 넘겼는지 (폼에 실어 보내 다시 받는다), last: 방금 넘긴 작품 (되돌리기용) -#}
+{#- 빠른 평가 한 장 = 폼 하나. 별점·상태·본 화수를 마음껏 고른 뒤 '저장하고 다음'을 눌러야 저장된다.
+    응답으로 다음 장이 오면 이 조각 전체(#quick)를 바꾼다. done: 이번에 넘긴 장 수, last: 방금 넘긴 작품(되돌리기용) -#}
 {% import "_ui.html" as ui %}
-<section id="quick" class="quick" hx-target="#quick" hx-swap="outerHTML">
+<section id="quick" class="quick">
   <p class="quick__progress muted small">
     이번에 {{ done }}장 · 내 평가 {{ review_count }}개
     {%- if last %}
-    · <button type="button" class="link-btn" hx-post="/quick/{{ last.product_no }}/undo" hx-vals='{"done": "{{ done }}"}'>{{ ui.icon('undo', 12) }}<span>{{ last.title }} 되돌리기</span></button>
+    · <button type="button" class="link-btn" hx-post="/quick/{{ last.product_no }}/undo" hx-vals='{"done": "{{ done }}"}' hx-target="#quick" hx-swap="outerHTML">{{ ui.icon('undo', 12) }}<span>{{ last.title }} 되돌리기</span></button>
     {%- endif %}
   </p>
   {% if comic %}
   {%- set no = comic.product_no %}
-  {%- set vals = '"done": "' ~ done ~ '"' %}
-  <article class="quick__card panel">
+  <form class="quick__card panel" hx-post="/quick/{{ no }}" hx-target="#quick" hx-swap="outerHTML">
+    <input type="hidden" name="done" value="{{ done }}">
     <a class="quick__cover" href="/comic/{{ no }}" target="_blank" rel="noopener">
       {%- if comic.thumbnail_url %}<img src="{{ comic.thumbnail_url }}" alt="" referrerpolicy="no-referrer">{% endif %}
     </a>
@@ -26,25 +26,18 @@
       <p class="quick__synopsis">{{ comic.synopsis | truncate(160) }}</p>
     </div>
     <div class="quick__answer">
-      <p class="field__label">봤다면 별점 (누르면 '봤음'으로 저장)</p>
-      <div class="stars stars--input stars--lg" role="group" aria-label="별점">
-        <span class="stars__track">
-          {%- for v in range(10, 0, -1) %}
-          <button type="button" class="stars__half stars__half--{{ 'r' if v % 2 == 0 else 'l' }}" title="별 {{ format_stars(v) }}개"
-                  aria-label="별 {{ format_stars(v) }}개" hx-post="/quick/{{ no }}" hx-vals='{"action": "score", "score": "{{ v }}", {{ vals }}}'>{{ ui.icon('star', 36) }}</button>
-          {%- endfor %}
-        </span>
-      </div>
+      {% if error %}<p class="alert alert--error m-0">{{ error }}</p>{% endif %}
+      {% call ui.field('별점') %}{{ ui.star_radio('score') }}{% endcall %}
+      {% call ui.field('상태', '별점만 고르면 봤음으로 저장해요') %}{{ ui.chip_radio('status', [('seen', '봤음'), ('watching', '보는 중'), ('dropped', '하차'), ('wish', '보고 싶음')]) }}{% endcall %}
+      {% call ui.field('본 ' ~ comic.unit ~ '수 (선택)') %}<input class="input quick__episodes" type="number" name="episodes_read" min="0" inputmode="numeric" placeholder="{{ comic.total_episodes or '' }}">{% endcall %}
+      {{ ui.button('저장하고 다음', 'primary', attrs='name="action" value="save"') }}
       <div class="quick__buttons">
-        {{ ui.button('봤음 (별점 없이)', 'secondary', type='button', attrs='hx-post="/quick/' ~ no ~ '" hx-vals=\'{"action": "seen", ' ~ vals ~ '}\'') }}
-        {{ ui.button('보는 중', 'secondary', type='button', attrs='hx-post="/quick/' ~ no ~ '" hx-vals=\'{"action": "watching", ' ~ vals ~ '}\'') }}
-        {{ ui.button('보고 싶음', 'secondary', type='button', attrs='hx-post="/quick/' ~ no ~ '" hx-vals=\'{"action": "wish", ' ~ vals ~ '}\'') }}
-        {{ ui.button('관심 없음', 'ghost', type='button', attrs='hx-post="/quick/' ~ no ~ '" hx-vals=\'{"action": "dismissed", ' ~ vals ~ '}\'') }}
+        {{ ui.button('안 봤음 · 넘기기', 'secondary', attrs='name="action" value="skip"') }}
+        {{ ui.button('관심 없음', 'ghost', attrs='name="action" value="dismissed"') }}
       </div>
-      {{ ui.button('안 봤음 · 넘기기', 'primary', type='button', attrs='hx-post="/quick/' ~ no ~ '" hx-vals=\'{"action": "skip", ' ~ vals ~ '}\'') }}
       <p class="field__hint">'안 봤음'은 취향에 반영하지 않고 다시 묻지만 않아요.</p>
     </div>
-  </article>
+  </form>
   {% else %}
   {% call ui.empty() %}더 물어볼 작품이 없어요. 수집이 더 되면 새 작품이 나와요.<br>{{ ui.button('추천 보러 가기', 'primary', href='/') }}{% endcall %}
   {% endif %}

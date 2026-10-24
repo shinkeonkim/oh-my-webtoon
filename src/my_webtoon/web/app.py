@@ -8,6 +8,7 @@ HTMX 로 부분 교체한다 — 프론트엔드 빌드 도구 없이 파이썬 
     GET  /quick, POST /quick/{no}  빠른 평가 — 한 장씩 보여 주고 누르면 다음 장 (되돌리기 /quick/{no}/undo)
     GET  /news                   소식: 이어 보기, 무료가 늘었어요, 완결, 기간 한정 무료
     GET  /rate?q=                검색해서 평가하기 (온보딩)
+    GET  /import/series          네이버 시리즈 '내 서재'에서 본 작품 가져오기 (북마클릿 → ?nos= 미리보기 → POST 저장)
     POST /import                 네이버 시리즈 URL/번호로 작품 바로 가져오기
     GET  /comics                 🔓 수집된 작품 목록 (검색·장르·정렬, 무한 스크롤)
     GET  /comic/{no}             🔓 작품 상세 + 비슷한 작품
@@ -58,6 +59,12 @@ HERE = Path(__file__).parent
 ALWAYS_PUBLIC = ("/login", "/static", "/healthz", "/readyz")
 PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui")  # 읽기 전용 공개 화면
 NEWS_DAYS = 30  # 소식 화면이 보여 주는 기간
+REVIEWED_FILTERS = {
+    "exclude": "안 본 것만",
+    "include": "본 것 포함",
+    "only": "본 것만",
+}  # 추천의 ?reviewed=
+SERIES_IMPORT_MAX = 2000  # 북마클릿 한 번에 받는 작품 번호 수
 PER_PAGE = 30
 SCORE_FILTERS = {  # /users/{name}?score=...  점수는 0~10(=별 반 개 단위). 세부 점수만 있으면 평균을 반올림.
     "10": ("★5", lambda s: s is not None and round(s) == 10),
@@ -242,6 +249,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             has_next=len(recs) == PER_PAGE,
             query_string=_query_without(request, "page", "snap"),
             snap=snap,
+            reviewed_filters=REVIEWED_FILTERS,
+            reviewed_tabs=[
+                (
+                    "/?"
+                    + urlencode(
+                        {
+                            **_query_dict(request, "page", "snap", "reviewed"),
+                            **({} if k == "exclude" else {"reviewed": k}),
+                        }
+                    ),
+                    label,
+                    None,
+                    opts.reviewed == k,
+                )
+                for k, label in REVIEWED_FILTERS.items()
+            ],
         )
         if request.headers.get("HX-Request") and page > 0:
             return render(request, "_rec_page.html", **ctx)  # 무한 스크롤: 다음 30개 + 다음 센티넬
@@ -258,23 +281,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # 한 번에 한 작품만. 누르면 저장하고 바로 다음 작품 조각을 돌려준다 (HTMX 가 #quick 을 통째로 바꾼다).
     # 목표는 평가 개수를 빨리 늘리는 것 — 평가가 많을수록 추천이 정확해진다 (docs/03).
 
-    QUICK_ACTIONS = {  # action → 저장할 상태 (None: 평가 안 함, '안 봤음'으로 넘기기만)
-        "seen": "seen",
-        "watching": "watching",
-        "wish": "wish",
-        "dismissed": "dismissed",
-        "skip": None,
-    }
+    # 카드 하나가 폼이다. 별점·상태·본 화수를 고르는 동안은 아무것도 저장하지 않고, 버튼을 눌러야 저장하고 넘어간다.
+    #   save       고른 값 저장 (별점만 골랐으면 상태는 '봤음')
+    #   skip       안 봤음 — 평가 아님, 다시 묻지만 않는다 (quick_skips)
+    #   dismissed  관심 없음
 
-    def quick_card(request: Request, conn, done: int = 0, last=None):
+    def quick_card(request: Request, conn, done: int = 0, last=None, comic=None, error=""):
         user = me(request)
-        queue = engine.quick_queue(conn, user.id, limit=1)
+        if comic is None:
+            queue = engine.quick_queue(conn, user.id, limit=1)
+            comic = queue[0] if queue else None
         return render(
             request,
             "_quick.html" if request.headers.get("HX-Request") else "quick.html",
-            comic=queue[0] if queue else None,
+            comic=comic,
             done=done,
             last=last,
+            error=error,
             review_count=len(db.all_reviews(conn, user.id)),
         )
 
@@ -287,18 +310,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = me(request)
         comic = comic_or_404(conn, product_no)
         form = await request.form()
-        action = form.get("action", "")
-        if action == "score":
-            score = _opt_int(form.get("score"))
-            db.update_review(conn, user.id, product_no, score=score, status="seen")
-        elif action in QUICK_ACTIONS:
-            if QUICK_ACTIONS[action]:
-                db.update_review(conn, user.id, product_no, status=QUICK_ACTIONS[action])
-            else:
-                db.set_quick_skip(conn, user.id, product_no, True)
+        action, done = form.get("action", ""), int(form.get("done") or 0)
+        if action == "save":
+            score, status = _opt_int(form.get("score")), form.get("status") or None
+            episodes = _opt_int(form.get("episodes_read"))
+            if score is None and status is None:
+                return quick_card(
+                    request, conn, done, comic=comic, error="별점이나 상태를 하나는 골라 주세요"
+                )
+            try:
+                db.update_review(
+                    conn, user.id, product_no,
+                    score=score, status=status or "seen", episodes_read=episodes,
+                )  # fmt: skip
+            except ValueError as exc:
+                return quick_card(request, conn, done, comic=comic, error=str(exc))
+        elif action == "dismissed":
+            db.update_review(conn, user.id, product_no, status="dismissed")
+        elif action == "skip":
+            db.set_quick_skip(conn, user.id, product_no, True)
         else:
             raise HTTPException(400, f"모르는 동작: {action}")
-        return quick_card(request, conn, done=int(form.get("done", 0)) + 1, last=comic)
+        return quick_card(request, conn, done=done + 1, last=comic)
 
     @app.post("/quick/{product_no}/undo", response_class=HTMLResponse)
     async def quick_undo(request: Request, product_no: int, conn=Depends(get_conn)):
@@ -308,13 +341,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         form = await request.form()
         db.delete_review(conn, user.id, product_no)
         db.set_quick_skip(conn, user.id, product_no, False)
-        return render(
+        return quick_card(
             request,
-            "_quick.html",
+            conn,
+            done=max(0, int(form.get("done") or 1) - 1),
             comic=db.get_comic(conn, product_no),
-            done=max(0, int(form.get("done", 1)) - 1),
-            last=None,
-            review_count=len(db.all_reviews(conn, user.id)),
         )
 
     # -- 소식 --------------------------------------------------------------------
@@ -415,6 +446,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engine.invalidate()
         return RedirectResponse(f"/comic/{product_no}", status_code=303)
 
+    # -- 네이버 시리즈에서 본 작품 가져오기 -----------------------------------------------
+    # 서버는 네이버에 로그인할 수 없다(비밀번호를 받으면 안 되고, '내 서재'는 robots.txt 가 막는다).
+    # 그래서 내 브라우저에서 북마클릿이 '지금 보고 있는 시리즈 페이지'의 작품 번호만 모아 여기로 넘긴다.
+    # 넘어온 번호는 미리보기만 하고, 확인 버튼을 눌러야 저장한다.
+
+    @app.get("/import/series", response_class=HTMLResponse)
+    def series_import_page(request: Request, nos: str = "", conn=Depends(get_conn)):
+        user = me(request)
+        numbers = list(dict.fromkeys(int(n) for n in re.findall(r"\d+", nos)))[:SERIES_IMPORT_MAX]
+        known = db.comics_by_ids(conn, numbers)
+        reviews = db.all_reviews(conn, user.id)
+        return render(
+            request,
+            "import_series.html",
+            received=len(numbers),
+            items=[(known[n], reviews.get(n)) for n in numbers if n in known],
+            unknown=[n for n in numbers if n not in known],
+            bookmarklet=bookmarklet(str(request.base_url).rstrip("/")),
+        )
+
+    @app.post("/import/series")
+    async def series_import_save(request: Request, conn=Depends(get_conn)):
+        user = me(request)
+        form = await request.form()
+        status = form.get("status") if form.get("status") in db.STATUSES else "seen"
+        saved = 0
+        for value in form.getlist("no"):
+            no = int(value)
+            current = db.get_review(conn, user.id, no)
+            if db.get_comic(conn, no) is None or (current and current.status):
+                continue  # 이미 상태를 남긴 작품은 덮어쓰지 않는다 (점수만 있으면 상태만 더한다)
+            db.update_review(conn, user.id, no, status=status)
+            saved += 1
+        queued = 0
+        if form.get("queue_unknown"):
+            queued = db.enqueue(conn, [int(n) for n in form.getlist("unknown")], None)
+        msg = f"{saved}개를 '{db.STATUSES[status]}'으로 저장했어요"
+        if queued:
+            msg += f" · 수집 안 된 {queued}개는 수집 대기열에 넣었어요"
+        return RedirectResponse(f"/users/{user.username}?msg={msg}", status_code=303)
+
     # -- 공개 화면: 수집 목록 / 상세 / 사용자별 평가 기록 ---------------------------------
 
     @app.get("/comics", response_class=HTMLResponse)
@@ -483,6 +555,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             reviews=db.all_reviews(conn, uid),
             boost=scoring_mod.boost(comic, opts),
             stingy=scoring_mod.is_stingy(comic, opts),
+            match=engine.match_score(conn, uid, product_no, opts) if uid else None,
         )
 
     @app.get("/me")
@@ -823,11 +896,31 @@ def options_from_query(request: Request) -> ScoringOptions:
         sink_stingy=(q.get("sink") == "1") if tuned else d.sink_stingy,
         include_adult=(q.get("adult") == "1") if tuned else d.include_adult,
         diversity=min(1.0, max(0.0, num("diversity", d.diversity))),
+        reviewed=q.get("reviewed") if q.get("reviewed") in REVIEWED_FILTERS else d.reviewed,
     )
 
 
 def _query_without(request: Request, *keys: str) -> str:
     return urlencode([(k, v) for k, v in request.query_params.multi_items() if k not in keys])
+
+
+def _query_dict(request: Request, *drop: str) -> dict:
+    return {k: v for k, v in request.query_params.items() if k not in drop}
+
+
+def bookmarklet(base_url: str) -> str:
+    """네이버 시리즈 페이지에서 누르면, 그 페이지의 작품 번호(productNo)를 모아 이 앱의 가져오기 화면을 연다.
+
+    내 브라우저에서 내 로그인으로 보고 있는 페이지를 읽는 것이라 서버는 네이버에 아무 요청도 하지 않는다.
+    소설·이북 번호가 섞여도 괜찮다 — 수집된 만화만 미리보기에 나온다.
+    """
+    js = (
+        "(()=>{const s=new Set();"
+        "for(const m of document.documentElement.innerHTML.matchAll(/productNo=(\\d+)/g))s.add(m[1]);"
+        "if(!s.size){alert('이 페이지에서 작품을 못 찾았어요. 시리즈 내 서재·최근 본 작품 페이지에서 눌러 주세요');return}"
+        f"window.open('{base_url}/import/series?nos='+[...s].slice(0,{SERIES_IMPORT_MAX}).join(','))}})()"
+    )
+    return "javascript:" + js
 
 
 def parse_product_no(text: str) -> int | None:

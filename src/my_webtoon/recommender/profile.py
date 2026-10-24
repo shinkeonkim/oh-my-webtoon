@@ -102,3 +102,38 @@ def liked_rows(features: ItemFeatures, reviews: dict[int, Review]) -> list[tuple
         for no, r in reviews.items()
         if no in features.index and (w := base_weight(r)) > 0
     ]
+
+
+def taste_similarities(
+    features: ItemFeatures, reviews: dict[int, Review], opts: ProfileOptions | None = None
+) -> np.ndarray | None:
+    """모든 작품과 취향 벡터의 코사인 유사도. 단 **내가 평가한 작품은 그 평가를 뺀 취향**과 비교한다.
+
+    그냥 계산하면 10점 준 작품은 자기 자신이 취향에 들어가 있어서 유사도가 당연히 높다(답을 보고 푸는 셈).
+    '본 것 포함' 추천이나 작품 상세의 추천도에서는 "이 평가가 없었어도 추천됐을까"가 궁금하니 자기 몫을 뺀다.
+
+    다시 계산하지 않고 식으로 뺀다 (작품 벡터 x 는 길이 1):
+        P   = Σ w·x               (정규화 전 취향)
+        P'  = P - w_i·x_i          (i 를 뺀 취향)
+        x_i·P' = x_i·P - w_i
+        |P'|²  = |P|² - 2·w_i·(x_i·P) + w_i²
+    """
+    rows, weights = [], []
+    now = datetime.now(UTC)
+    for product_no, review in reviews.items():
+        if product_no in features.index:
+            rows.append(features.index[product_no])
+            weights.append(review_weight(review, opts, now))
+    if not any(w > 0 for w in weights):
+        return None
+
+    raw = np.asarray(features.matrix[rows].T @ np.array(weights)).ravel()
+    norm = np.linalg.norm(raw)
+    if norm == 0:
+        return None
+    dots = np.asarray(features.matrix @ raw).ravel()  # 모든 작품 x·P
+    sims = dots / norm
+    for row, w in zip(rows, weights, strict=True):
+        rest = norm**2 - 2 * w * dots[row] + w**2
+        sims[row] = (dots[row] - w) / np.sqrt(rest) if rest > 1e-9 else 0.0
+    return sims

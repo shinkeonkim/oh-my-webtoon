@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}시리즈에서 가져오기 · my-webtoon{% endblock %}
+{% block content %}
+{{ ui.page_header('네이버 시리즈에서 본 작품 가져오기', '내 서재에 있는 작품을 한 번에 평가 기록으로') }}
+
+{% if not received %}
+<section class="panel">
+  <h2>어떻게 하나요</h2>
+  <p class="panel__desc">
+    네이버는 다른 서비스가 시리즈 시청 기록을 가져갈 수 있는 API 를 주지 않고, '내 서재' 페이지는 로봇 수집도 막아 두었어요.
+    그래서 서버가 대신 로그인하지 않고, <b>내 브라우저에서</b> 지금 보고 있는 시리즈 페이지의 작품 번호만 모아 여기로 넘겨요.
+    비밀번호나 쿠키는 이 앱으로 오지 않아요.
+  </p>
+  <ol class="steps">
+    <li>PC 브라우저에서 아래 버튼을 <b>북마크바로 끌어다 놓으세요</b>.
+      <p class="row mt-2"><a class="btn btn--primary" href="{{ bookmarklet }}" onclick="event.preventDefault(); alert('누르지 말고 북마크바로 끌어다 놓으세요')">my-webtoon 으로 보내기</a></p>
+    </li>
+    <li>네이버 시리즈에 로그인하고 <b>내 서재</b>(최근 본 작품·구매 작품 등)를 여세요. 목록이 길면 끝까지 스크롤해서 다 보이게 해 주세요.</li>
+    <li>북마크바의 <b>my-webtoon 으로 보내기</b>를 누르면 새 탭에 이 화면이 열려요. 목록을 확인하고 저장하면 끝이에요.</li>
+  </ol>
+  <p class="field__hint mt-3">휴대폰은 북마클릿이 번거로워요 — PC 에서 한 번 해 두는 걸 추천해요. 소설·이북이 섞여 있어도 수집된 만화만 보여요.</p>
+</section>
+{% else %}
+<form method="post" action="/import/series" class="stack-wide">
+  <section class="panel">
+    <h2>받은 작품 {{ received }}개 · 수집된 만화 {{ items | length }}개</h2>
+    <p class="panel__desc">체크한 작품을 아래 상태로 저장해요. 이미 상태를 남긴 작품은 건드리지 않아요(별점만 있으면 상태만 더해요).</p>
+    {% call ui.field('저장할 상태') %}{{ ui.chip_radio('status', [('seen', '봤음'), ('watching', '보는 중'), ('wish', '보고 싶음')], 'seen', none_label=none) }}{% endcall %}
+    {% if items %}
+    <ul class="list import-list mt-3">
+      {%- for comic, review in items %}
+      <li>
+        <label class="check">
+          <input type="checkbox" name="no" value="{{ comic.product_no }}"{{ ' checked' if not (review and review.status) }}>
+          <span>{{ comic.title }} <span class="muted small">{{ (comic.authors[:1] + [comic.genre]) | select | join(' · ') }}</span></span>
+        </label>
+        {%- if review and review.status %}{{ ui.badge('이미 ' ~ review.status_label) }}{% endif %}
+      </li>
+      {%- endfor %}
+    </ul>
+    {% else %}
+    {{ ui.empty('받은 번호 중 수집된 만화가 없어요. 아래에서 수집 대기열에 넣어 두면 수집 후 다시 가져올 수 있어요.') }}
+    {% endif %}
+    {% if unknown %}
+    <label class="check mt-3"><input type="checkbox" name="queue_unknown" value="1"> 아직 수집 안 된 {{ unknown | length }}개를 수집 대기열에 넣기 <span class="muted small">(소설·이북이면 수집이 실패하고 끝나요)</span></label>
+    {%- for n in unknown %}<input type="hidden" name="unknown" value="{{ n }}">{% endfor %}
+    {% endif %}
+    <p class="row mt-5">{{ ui.button('저장', 'primary') }}{{ ui.button('취소', 'ghost', href='/import/series') }}</p>
+  </section>
+</form>
+{% endif %}
+{% endblock %}

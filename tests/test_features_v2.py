@@ -9,19 +9,39 @@ from .test_web import HX, ME, review
 # -- 빠른 평가 -----------------------------------------------------------------
 
 
-def test_quick_rating_saves_and_moves_to_next(client, library):
+def test_quick_rating_saves_all_fields_on_explicit_save(client, library):
     page = client.get("/quick").text
     assert "빠른 평가" in page and 'id="quick"' in page
 
     first = _quick_product(page)
-    resp = client.post(
-        f"/quick/{first}", data={"action": "score", "score": "8", "done": "0"}, headers=HX
-    )
+    data = {
+        "action": "save",
+        "score": "8",
+        "status": "watching",
+        "episodes_read": "12",
+        "done": "0",
+    }
+    resp = client.post(f"/quick/{first}", data=data, headers=HX)
     assert resp.status_code == 200 and "<html" not in resp.text  # 다음 장 조각만
     r = review(library, first)
-    assert (r.score, r.status) == (8, "seen")  # 별점을 누르면 '봤음'까지
+    assert (r.score, r.status, r.episodes_read) == (8, "watching", 12)  # 한 번에 여러 값
     assert _quick_product(resp.text) != first
     assert "이번에 1장" in resp.text and "되돌리기" in resp.text
+
+
+def test_quick_score_only_means_seen_and_empty_save_stays(client, library):
+    first = _quick_product(client.get("/quick").text)
+    resp = client.post(
+        f"/quick/{first}",
+        data={"action": "save", "score": "", "status": "", "done": "0"},
+        headers=HX,
+    )
+    assert (
+        "하나는 골라 주세요" in resp.text and _quick_product(resp.text) == first
+    )  # 넘어가지 않는다
+    assert review(library, first) is None
+    client.post(f"/quick/{first}", data={"action": "save", "score": "6", "status": ""}, headers=HX)
+    assert review(library, first).status == "seen"
 
 
 def test_quick_skip_is_not_a_review_and_undo_restores(client, library):
@@ -199,3 +219,103 @@ def test_diversity_spreads_authors(library):
         return next(i for i, r in enumerate(recs) if r.comic.authors != ["김무협"])
 
     assert first_other_author(mixed) < first_other_author(plain)
+
+
+# -- 본 것 포함/미포함 · 추천도 ------------------------------------------------------------
+
+
+def test_reviewed_filter_include_and_only(library):
+    with db.session(library) as conn:
+        db.update_review(conn, ME, 1, score=10)
+        db.update_review(conn, ME, 2, score=9)
+        db.update_review(conn, ME, 6, status="dismissed")
+        engine = Engine()
+
+        def nos(mode):
+            return {
+                r.comic.product_no
+                for r in engine.recommend(
+                    conn, ME, ScoringOptions(reviewed=mode, sink_stingy=False), limit=50
+                )
+            }
+
+        assert not nos("exclude") & {1, 2}
+        assert {1, 2} <= nos("include") and 6 not in nos("include")  # 관심 없음은 늘 뺀다
+        assert nos("only") == {1, 2}
+
+
+def test_reviewed_item_similarity_leaves_itself_out(library):
+    """10점 준 작품이 '자기 자신'과 닮아서 1등이 되면 안 된다 — 그 평가를 빼고 계산한다."""
+    from my_webtoon.recommender.profile import taste_similarities
+
+    with db.session(library) as conn:
+        db.update_review(conn, ME, 1, score=10)
+        db.update_review(conn, ME, 5, score=10)
+        engine = Engine()
+        features = engine._load(conn)
+        sims = taste_similarities(features, db.all_reviews(conn, ME), engine.profile_opts)
+    # 1 을 빼면 남은 취향은 로맨스(5) 하나뿐 → 무협인 1 은 로맨스인 6 보다 덜 비슷해야 한다.
+    # 자기 자신을 포함했다면 1 의 유사도가 가장 높게 나왔을 것이다.
+    assert sims[features.index[1]] < sims[features.index[6]]
+
+
+def test_match_score_on_detail(client, library):
+    assert 'class="match__value"' not in client.get("/comic/2").text  # 평가가 없으면 안 보인다
+    client.post("/reviews/1", data={"score": "10"}, headers=HX)
+    page = client.get("/comic/2").text
+    assert 'class="match__value"' in page
+    murim = _match(page)
+    romance = _match(client.get("/comic/6").text)
+    assert murim > romance  # 무협을 좋아하면 무협 작품 추천도가 더 높다
+    assert "이 작품 평가는 빼고 계산" in client.get("/comic/1").text
+
+
+def _match(html: str) -> int:
+    import re
+
+    return int(re.search(r'class="match__value">(\d+)<', html).group(1))
+
+
+def test_index_has_reviewed_tabs(client, library):
+    client.post("/reviews/1", data={"score": "10"}, headers=HX)
+    page = client.get("/?reviewed=include").text
+    assert "본 것 포함" in page and "천마 회귀록" in page
+    assert "/reviews/1/dismiss" not in page  # 평가한 작품 카드엔 × 가 없다 (상태를 덮어쓰지 않게)
+
+
+# -- 시리즈에서 가져오기 -------------------------------------------------------------------
+
+
+def test_series_import_preview_and_save(client, library):
+    page = client.get("/import/series").text
+    assert "javascript:" in page and "/import/series?nos=" in page  # 북마클릿
+
+    client.post("/reviews/2", data={"status": "dropped"}, headers=HX)
+    client.post("/reviews/4", data={"score": "9"}, headers=HX)
+    preview = client.get("/import/series", params={"nos": "1,2,4,999999"}).text
+    assert "받은 작품 4개" in preview and "수집된 만화 3개" in preview
+    assert "이미 하차" in preview and "아직 수집 안 된 1개" in preview
+    assert review(library, 1) is None  # 미리보기는 저장하지 않는다
+
+    resp = client.post(
+        "/import/series",
+        data={"no": ["1", "2", "4"], "status": "seen", "queue_unknown": "1", "unknown": ["999999"]},
+    )
+    assert resp.status_code == 200 and "2개를" in resp.text
+    assert review(library, 1).status == "seen"
+    assert review(library, 2).status == "dropped"  # 이미 상태가 있으면 덮어쓰지 않는다
+    assert (review(library, 4).score, review(library, 4).status) == (
+        9,
+        "seen",
+    )  # 점수만 있으면 상태를 더한다
+    with db.session(library) as conn:
+        assert 999999 in db.next_pending(conn, 100)
+
+
+def test_rated_card_does_not_resemble_itself(library):
+    with db.session(library) as conn:
+        db.update_review(conn, ME, 1, score=10)
+        db.update_review(conn, ME, 2, score=9)
+        recs = Engine().recommend(conn, ME, ScoringOptions(reviewed="include", sink_stingy=False))
+    for rec in recs:
+        assert rec.because is None or rec.because.product_no != rec.comic.product_no

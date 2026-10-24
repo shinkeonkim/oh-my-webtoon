@@ -40,6 +40,9 @@ class ScoringOptions:
     episode_saturation: int = 300  # 총 300화면 회차점수 만점
     include_adult: bool = False
     diversity: float = 0.3  # 다양화 세기 0~1 (engine._diversify, MMR). 0 이면 점수순 그대로
+    reviewed: str = (
+        "exclude"  # 평가한 작품: exclude(안 본 것만) / include(본 것 포함) / only(본 것만)
+    )
 
 
 def _episodes(comic: Comic, n: int | None) -> float:

@@ -205,6 +205,27 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
 }
 .stars__zero:hover { border-color: var(--line-strong); color: var(--text); }
 .stars__zero.is-on { background: var(--text); border-color: var(--text); color: var(--surface); }
+/* 라디오 별점 (star_radio) — input:checked 부터 DOM 뒤쪽(= 화면 왼쪽) 별까지 칠한다 */
+.stars--radio input { position: absolute; opacity: 0; pointer-events: none; }
+.stars--radio .stars__half { cursor: pointer; }
+.stars--radio input:checked ~ .stars__half { color: var(--star); }
+.stars--radio .stars__track:hover .stars__half { color: var(--star-off); }
+.stars--radio .stars__track .stars__half:hover,
+.stars--radio .stars__track .stars__half:hover ~ .stars__half { color: var(--star); }
+.stars--radio input:focus-visible + .stars__half { box-shadow: var(--focus); border-radius: 4px; }
+.stars__clear {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  border: 1px solid var(--line); color: var(--text-3); cursor: pointer;
+}
+.stars__clear:hover { color: var(--text); border-color: var(--line-strong); }
+.stars--radio input[value=""]:checked + .stars__clear { visibility: hidden; }
+
+/* 라디오 칩 (chip_radio) */
+.chip-radio { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.chip-radio input { position: absolute; opacity: 0; pointer-events: none; }
+.chip-radio .chip { display: inline-flex; align-items: center; height: 32px; padding: 0 var(--space-3); font-size: var(--text-sm); }
+.chip-radio input:checked + .chip { background: var(--text); border-color: var(--text); color: var(--surface); font-weight: 600; }
+.chip-radio input:focus-visible + .chip { box-shadow: var(--focus); }
 
 /* 패널 (흰 상자) */
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow); }
@@ -404,6 +425,7 @@ footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); pa
 .quick__synopsis { color: var(--text-2); font-size: var(--text-sm); }
 .quick__answer { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-3); border-top: 1px solid var(--line); padding-top: var(--space-4); }
 .quick__answer > .btn { height: 48px; font-size: var(--text-md); }
+.quick__episodes { max-width: 140px; }
 .quick__buttons { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
 .quick.htmx-request .quick__card { opacity: .5; transition: opacity .15s; }
 .stars--lg .stars__half { width: 18px; height: 36px; }
@@ -419,6 +441,19 @@ footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); pa
   .stars--lg .stars__half--r .icon { margin-left: -16px; }
   .stars--lg .stars__half--r { margin-right: 4px; }
 }
+
+/* 작품 상세: 추천도 */
+.match { display: flex; flex-direction: column; gap: 6px; padding: var(--space-3) var(--space-4); border-radius: var(--radius); background: var(--accent-soft); }
+.match__head { display: flex; align-items: baseline; gap: var(--space-2); }
+.match__label { font-size: var(--text-sm); font-weight: 600; color: var(--accent-strong); }
+.match__value { font-size: 1.75rem; line-height: 1; color: var(--accent-strong); font-variant-numeric: tabular-nums; }
+.match .progress { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+.match__detail { font-size: var(--text-xs); color: var(--text-2); }
+
+/* 시리즈에서 가져오기 */
+.steps { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: var(--space-3); font-size: var(--text-sm); }
+.import-list { max-height: 60vh; overflow-y: auto; }
+.import-list li { padding: var(--space-2) 0; }
 
 /* 소식 */
 .news-item { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
@@ -474,6 +509,7 @@ footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); pa
 /* 유틸 (간격만) */
 .mt-2 { margin-top: var(--space-2); }
 .mt-3 { margin-top: var(--space-3); }
+.mt-5 { margin-top: var(--space-5); }
 .mb-4 { margin-bottom: var(--space-4); }
 .mb-5 { margin-bottom: var(--space-5); }
 .m-0 { margin: 0; }

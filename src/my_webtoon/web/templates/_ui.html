@@ -102,6 +102,31 @@
 </span>
 {%- endmacro %}
 
+{#- 별점 고르기 (폼 안에서 쓰는 라디오 버전). star_input 과 달리 누르는 순간 저장하지 않고 폼과 같이 보낸다.
+    DOM 은 [지우기] 10→1 + row-reverse — 고른 별(input:checked)부터 왼쪽 별까지 CSS 만으로 칠한다. -#}
+{% macro star_radio(name, selected=None, size="lg") -%}
+<span class="stars stars--radio stars--{{ size }}" role="radiogroup" aria-label="별점 (반 개 단위)">
+  <span class="stars__track">
+    {%- for v in range(10, 0, -1) %}
+    <input type="radio" name="{{ name }}" value="{{ v }}" id="{{ name }}-{{ v }}"{{ ' checked' if selected == v }}>
+    <label for="{{ name }}-{{ v }}" class="stars__half stars__half--{{ 'r' if v % 2 == 0 else 'l' }}" title="별 {{ format_stars(v) }}개 ({{ v }}점)">{{ icon('star', 36) }}</label>
+    {%- endfor %}
+  </span>
+  <input type="radio" name="{{ name }}" value="" id="{{ name }}-none"{{ ' checked' if selected is none }}>
+  <label for="{{ name }}-none" class="stars__clear" title="별점 지우기">{{ icon('x', 14) }}</label>
+</span>
+{%- endmacro %}
+
+{#- 하나만 고르는 칩 (라디오). options: [(값, 라벨), ...]. none_label 이 있으면 빈 값을 맨 앞에 '없음'으로 둔다. -#}
+{% macro chip_radio(name, options, selected="", none_label="없음") -%}
+<span class="chip-radio" role="radiogroup">
+  {%- for value, label in ([("", none_label)] if none_label else []) + options | list %}
+  <input type="radio" name="{{ name }}" value="{{ value }}" id="{{ name }}-{{ value or 'none' }}"{{ ' checked' if value == (selected or "") }}>
+  <label class="chip" for="{{ name }}-{{ value or 'none' }}">{{ label }}</label>
+  {%- endfor %}
+</span>
+{%- endmacro %}
+
 {#- 진행 막대. percent: 0~100 -#}
 {% macro progress(percent, label=None) -%}
 <span class="progress" role="progressbar" aria-valuenow="{{ percent }}" aria-valuemin="0" aria-valuemax="100"{% if label %} aria-label="{{ label }}"{% endif %}><i style="width: {{ percent }}%"></i></span>

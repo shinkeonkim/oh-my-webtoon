@@ -29,7 +29,8 @@
     </form>
   </details>
 
-  <div class="home-links">
+  {{ ui.tabs(reviewed_tabs, '평가한 작품') }}
+  <div class="home-links mt-3">
     {%- if news_count %}<a class="home-link home-link--news" href="/news">{{ ui.icon('bell') }}<span>지난 7일 소식 <b>{{ news_count }}</b>개 — 무료가 늘었거나 완결된 작품</span></a>{% endif %}
     <a class="home-link" href="/quick">{{ ui.icon('bolt') }}<span>빠른 평가 — 평가가 많을수록 추천이 정확해져요</span></a>
   </div>

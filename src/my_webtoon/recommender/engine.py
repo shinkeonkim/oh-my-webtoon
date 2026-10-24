@@ -25,7 +25,7 @@ from .. import db
 from ..db import Comic, Review
 from . import scoring
 from .features import DEFAULT_META_WEIGHT, DEFAULT_TEXT_WEIGHT, ItemFeatures, build_features
-from .profile import ProfileOptions, build_profile, liked_rows
+from .profile import ProfileOptions, build_profile, liked_rows, taste_similarities
 from .scoring import ScoringOptions
 from .works import work_keys
 
@@ -127,15 +127,58 @@ class Engine:
         features = self._features
         if features is None:
             return []
-        profile = build_profile(features, reviews, self.profile_opts)
-        if profile is None:
+        # 모든 작품과 취향의 코사인 유사도 (평가한 작품은 그 평가를 뺀 취향과 — profile.taste_similarities)
+        similarities = taste_similarities(features, reviews, self.profile_opts)
+        if similarities is None:
             return []
-        similarities = features.matrix @ profile  # 모든 작품과 취향의 코사인 유사도 (한 번에)
-        # 어느 판본이든 평가했으면 그 작품의 다른 판본도 빼기
+        dismissed = {no for no, r in reviews.items() if r.status == "dismissed"}
+        if opts.reviewed == "include":  # 본 것 포함: '관심 없음'만 뺀다
+            return self._rank(features, similarities, opts, exclude=dismissed)
+        if opts.reviewed == "only":  # 본 것만: 평가한 작품 중에서 순위
+            return self._rank(
+                features, similarities, opts, exclude=dismissed, only=set(reviews) - dismissed
+            )
+        # 기본 (안 본 것만): 평가한 작품과, 어느 판본이든 평가했으면 그 작품의 다른 판본도 빼기
         reviewed_works = {self._work[no] for no in reviews if no in self._work}
         return self._rank(
             features, similarities, opts, exclude=set(reviews), exclude_works=reviewed_works
         )
+
+    def match_score(
+        self, conn: sqlite3.Connection, user_id: int, product_no: int, opts: ScoringOptions
+    ) -> dict | None:
+        """작품 상세의 '추천도' (0~100). 이 작품의 최종 점수가 전체 작품 중 상위 몇 %인지를 뒤집은 값.
+
+            추천도 = 최종 점수가 이 작품보다 낮은 작품 비율 × 100   (100 = 1등, 50 = 딱 중간)
+
+        유사도 자체(0.1~0.5 정도)는 크기가 직관적이지 않아서 백분위로 바꿨다. 평가한 작품이면 그 평가를 빼고
+        계산한다 — "내 다른 평가만으로도 추천됐을까". 취향이 아직 없으면 None.
+        """
+        features = self._load(conn)
+        if features is None or product_no not in features.index:
+            return None
+        reviews = db.all_reviews(conn, user_id)
+        sims = taste_similarities(features, reviews, self.profile_opts)
+        if sims is None:
+            return None
+        comics = [self._comics[no] for no in features.product_nos]
+        keep = np.array([opts.include_adult or not scoring.is_adult(c) for c in comics])
+        boosts = np.array([scoring.boost(c, opts) for c in comics])
+        finals = sims * boosts
+        row = features.index[product_no]
+        pool_finals, pool_sims = finals[keep], sims[keep]
+        n = max(1, len(pool_finals) - 1)
+        return {
+            # 내림: 100 은 진짜 1등만 (7위가 반올림으로 100 이 되지 않게)
+            "percent": math.floor(100 * float((pool_finals < finals[row]).sum()) / n),
+            "taste_percent": math.floor(100 * float((pool_sims < sims[row]).sum()) / n),
+            "rank": int((pool_finals > finals[row]).sum()) + 1,
+            "total": len(pool_finals),
+            "similarity": float(sims[row]),
+            "boost": float(boosts[row]),
+            "stingy": scoring.is_stingy(self._comics[product_no], opts),
+            "left_out": product_no in reviews,
+        }
 
     def similar_to(
         self,
@@ -276,12 +319,15 @@ class Engine:
         opts: ScoringOptions,
         exclude: set[int],
         exclude_works: set[str] = frozenset(),
+        only: set[int] | None = None,
     ) -> list[Recommendation]:
         recs = []
         for row, sim in enumerate(similarities):
-            if sim <= 0:
+            if sim <= 0 and only is None:  # '본 것만'에선 취향과 반대인 작품도 순위에 둔다
                 continue
             comic = self._comics[features.product_nos[row]]
+            if only is not None and comic.product_no not in only:
+                continue
             if comic.product_no in exclude or self._work[comic.product_no] in exclude_works:
                 continue
             if not opts.include_adult and scoring.is_adult(comic):
@@ -307,7 +353,7 @@ class Engine:
             else:
                 first[key] = rec
                 unique.append(rec)
-        if opts.diversity > 0:
+        if opts.diversity > 0 and only is None:  # '본 것만'은 내 평가 목록이라 섞을 필요가 없다
             unique = self._diversify(features, unique, opts)
         return unique
 
@@ -356,13 +402,20 @@ class Engine:
         for rec in recs:
             if rec.comic.product_no not in features.index:
                 continue
+            # '본 것 포함'에선 후보가 내가 좋아한 작품 자신일 수 있다 → 같은 작품(판본 포함)은 '닮은 작품'에서 뺀다
+            own = self._work[rec.comic.product_no]
+            others = [i for i, no in enumerate(liked_nos) if self._work[no] != own]
+            if not others:
+                continue
             sims = np.asarray(
-                (liked_matrix @ features.row(rec.comic.product_no).T).todense()
+                (liked_matrix[others] @ features.row(rec.comic.product_no).T).todense()
             ).ravel()
             best = int(np.argmax(sims))
             if sims[best] > 0:
-                rec.because = self._comics[liked_nos[best]]
-            rec.shared = self._shared_tokens(features, rec.comic.product_no, liked_nos)
+                rec.because = self._comics[liked_nos[others[best]]]
+            rec.shared = self._shared_tokens(
+                features, rec.comic.product_no, [liked_nos[i] for i in others]
+            )
 
     def _shared_tokens(
         self, features: ItemFeatures, product_no: int, others: list[int], top: int = 4
