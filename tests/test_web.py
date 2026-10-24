@@ -263,3 +263,24 @@ def test_half_star_scores_and_styleguide(client):
 def test_static_assets_are_versioned(client):
     page = client.get("/comics").text
     assert "/static/style.css?v=" in page and "/static/htmx.min.js?v=" in page
+
+
+def test_readyz_after_warm_up(client):
+    import time
+
+    for _ in range(50):
+        if client.get("/readyz").status_code == 200:
+            break
+        time.sleep(0.05)
+    assert client.get("/readyz").json() == {"ready": True}
+
+
+def test_next_crawl_waits_for_interval():
+    from datetime import UTC, datetime, timedelta
+
+    from my_webtoon.crawler.runner import next_run_delay
+
+    now = datetime(2026, 10, 25, 12, tzinfo=UTC)
+    assert next_run_delay(None, 3600, now) == 0  # 처음이면 바로
+    assert next_run_delay((now - timedelta(minutes=20)).isoformat(), 3600, now) == 2400
+    assert next_run_delay((now - timedelta(hours=2)).isoformat(), 3600, now) == 0

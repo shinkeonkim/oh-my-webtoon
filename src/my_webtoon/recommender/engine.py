@@ -47,6 +47,10 @@ class Engine:
         with self._lock:
             self._signature = None
 
+    def warm_up(self, conn: sqlite3.Connection) -> None:
+        """작품 벡터를 미리 만들어 둔다 (첫 요청이 느리지 않게). 파드가 뜰 때 /readyz 전에 부른다."""
+        self._load(conn)
+
     def _load(self, conn: sqlite3.Connection) -> ItemFeatures | None:
         signature = db.comics_signature(conn)
         with self._lock:

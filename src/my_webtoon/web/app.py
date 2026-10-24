@@ -48,7 +48,7 @@ from . import auth
 
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
-ALWAYS_PUBLIC = ("/login", "/static", "/healthz")
+ALWAYS_PUBLIC = ("/login", "/static", "/healthz", "/readyz")
 PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui")  # 읽기 전용 공개 화면
 PER_PAGE = 30
 SCORE_FILTERS = {  # /users/{name}?score=...  점수는 0~10(=별 반 개 단위). 세부 점수만 있으면 평균을 반올림.
@@ -94,8 +94,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 log.exception("정기 작업 실패")
             stop_backup.wait(timeout=3600)
 
+    ready = threading.Event()
+
+    def warm_up() -> None:
+        try:
+            with db.session(settings.database_path) as conn:
+                engine.warm_up(conn)
+        except Exception:
+            log.exception("워밍업 실패 — 그래도 요청은 받는다 (첫 추천이 조금 느릴 뿐)")
+        ready.set()
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        threading.Thread(target=warm_up, name="warm-up", daemon=True).start()
         if settings.crawl_enabled:
             crawler.start()
         threading.Thread(target=maintenance_loop, name="maintenance", daemon=True).start()
@@ -550,7 +561,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def healthz():
+        """살아 있는지 (livenessProbe). 프로세스가 응답하면 OK."""
         return {"ok": True}
+
+    @app.get("/readyz")
+    def readyz():
+        """트래픽을 받아도 되는지 (readinessProbe). 추천 벡터 워밍업이 끝나야 200.
+        무중단 배포에서 새 파드는 이게 200 이 된 뒤에야 Service 에 붙고, 그다음에 옛 파드가 내려간다."""
+        if not ready.is_set():
+            return JSONResponse({"ready": False}, status_code=503)
+        return {"ready": True}
 
     return app
 

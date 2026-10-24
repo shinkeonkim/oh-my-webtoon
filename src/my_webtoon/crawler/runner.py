@@ -183,6 +183,17 @@ def import_one(
     return data
 
 
+def next_run_delay(
+    last_started_at: str | None, interval_seconds: float, now: datetime | None = None
+) -> float:
+    """다음 수집까지 기다릴 초. 한 번도 안 돌았으면 0."""
+    if last_started_at is None:
+        return 0.0
+    now = now or datetime.now(UTC)
+    elapsed = (now - datetime.fromisoformat(last_started_at)).total_seconds()
+    return max(0.0, interval_seconds - elapsed)
+
+
 class BackgroundCrawler:
     """웹 서버 프로세스 안에서 주기적으로 run_once() 를 돌리는 스레드.
 
@@ -218,9 +229,15 @@ class BackgroundCrawler:
     def _loop(self) -> None:
         interval = self.settings.crawl_interval_hours * 3600
         while not self._stop.is_set():
+            # 배포할 때마다 바로 수집하지 않도록, 마지막 실행 시각부터 interval 이 지났을 때 돈다.
+            # (무중단 배포 중엔 옛 파드와 새 파드가 잠깐 같이 떠 있어서, 둘이 동시에 수집하지 않게 하는 효과도 있다)
+            with db.session(self.database_path) as conn:
+                delay = next_run_delay(db.last_run_started_at(conn), interval)
+            if delay > 0 and self._wake.wait(timeout=delay):
+                self._wake.clear()  # '지금 수집' 버튼 → 기다리지 않고 바로
+            if self._stop.is_set():
+                return
             self.run_now()
-            self._wake.wait(timeout=interval)
-            self._wake.clear()
 
     def run_now(self) -> RunResult | None:
         if not self._lock.acquire(blocking=False):

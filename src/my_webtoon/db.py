@@ -369,6 +369,11 @@ def finish_run(
     )
 
 
+def last_run_started_at(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute("SELECT MAX(started_at) FROM crawl_runs").fetchone()
+    return row[0]
+
+
 def recent_runs(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM crawl_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
