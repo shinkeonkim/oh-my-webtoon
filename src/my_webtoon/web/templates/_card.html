@@ -1,0 +1,33 @@
+{#- 작품 카드 매크로. rec 가 있으면 추천 점수/이유도 같이 보여준다. -#}
+{% macro card(comic, rating=None, rec=None) %}
+<article class="card{% if rec and rec.stingy %} stingy{% endif %}">
+  <a class="thumb" href="/comic/{{ comic.product_no }}">
+    {% if comic.thumbnail_url %}<img src="{{ comic.thumbnail_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
+  </a>
+  <div class="body">
+    <h3><a href="/comic/{{ comic.product_no }}">{{ comic.title }}</a></h3>
+    <p class="sub">
+      {{ comic.authors | join(' · ') }}
+      {% if comic.genre %}<span class="dot">·</span>{{ comic.genre }}{% endif %}
+      {% if comic.status %}<span class="dot">·</span>{{ comic.status }}{% endif %}
+    </p>
+    <p class="badges">
+      <span class="badge {{ 'free-all' if comic.is_all_free else ('free-few' if (comic.free_episodes or 0) <= 3 and comic.unit == '화' else 'free') }}">{{ free_label(comic) }}</span>
+      {% if comic.total_episodes %}<span class="badge">{{ episodes_label(comic) }}</span>{% endif %}
+      {% if comic.naver_rating %}<span class="badge">★ {{ '%.1f' % comic.naver_rating }}</span>{% endif %}
+      {% if comic.promo_label %}<span class="badge promo">⏰ {{ comic.promo_label }}</span>{% endif %}
+    </p>
+    {% if rec %}
+    <p class="why">
+      {% if rec.because %}<span class="because">닮은 작품 <b>{{ rec.because.title }}</b></span>{% endif %}
+      {% for t in rec.shared %}<span class="tag">{{ t }}</span>{% endfor %}
+    </p>
+    <p class="math" title="최종 = 취향 유사도 × 무료/회차/평점 보정">
+      유사도 {{ '%.3f' % rec.similarity }} × 보정 {{ '%.2f' % rec.boost }} = <b>{{ '%.3f' % rec.final }}</b>
+      {% if rec.stingy %}<span class="warn">유료 위주 → 아래로</span>{% endif %}
+    </p>
+    {% endif %}
+    {% include "_rate.html" %}
+  </div>
+</article>
+{% endmacro %}

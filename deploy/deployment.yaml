@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-webtoon
+  annotations:
+    reloader.stakater.com/auto: "true" # 시크릿이 바뀌면 재시작
+spec:
+  replicas: 1 # SQLite 쓰기 주체가 하나여야 한다 (크롤러가 웹 프로세스 안에서 돈다)
+  strategy:
+    type: Recreate # RWO PVC 라 롤링 업데이트 중 두 파드가 동시에 붙을 수 없다
+  selector:
+    matchLabels: &labels
+      app.kubernetes.io/name: my-webtoon
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ghcr.io/shinkeonkim/my-webtoon:latest
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - { name: DATABASE_PATH, value: /data/my-webtoon.db }
+            - { name: CRAWL_ENABLED, value: "1" }
+            - { name: CRAWL_INTERVAL_HOURS, value: "6" }
+            - { name: CRAWL_BATCH_SIZE, value: "300" }
+            - { name: CRAWL_DELAY_SECONDS, value: "1.5" }
+            - { name: HOME, value: /tmp }
+          envFrom:
+            - secretRef:
+                name: my-webtoon-secrets # APP_PASSWORD, SESSION_SECRET
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: my-webtoon-data
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,75 @@
+"""명령줄 진입점.
+
+my-webtoon serve                 웹 서버 (기본 0.0.0.0:8000)
+my-webtoon crawl --limit 500     크롤링 한 번 (로컬에서 데이터를 미리 채울 때)
+my-webtoon import 2140867        작품 하나만 가져오기
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+
+from . import db
+from .config import load_settings
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="my-webtoon")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    serve = sub.add_parser("serve", help="웹 서버 실행")
+    serve.add_argument("--host", default="0.0.0.0")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--reload", action="store_true")
+
+    crawl = sub.add_parser("crawl", help="크롤링 한 번 실행")
+    crawl.add_argument("--limit", type=int, default=None, help="상세 페이지 최대 개수")
+    crawl.add_argument("--seeds", action="store_true", help="시드 페이지를 강제로 다시 수집")
+
+    imp = sub.add_parser("import", help="작품 하나 가져오기")
+    imp.add_argument("product_no", type=int)
+
+    args = parser.parse_args(argv)
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    settings = load_settings()
+    with db.session(settings.database_path) as conn:
+        db.init_schema(conn)
+
+    if args.command == "serve":
+        import uvicorn
+
+        uvicorn.run(
+            "my_webtoon.web.app:create_app",
+            factory=True,
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            proxy_headers=True,
+            forwarded_allow_ips="*",
+        )
+    elif args.command == "crawl":
+        from .crawler.runner import run_once
+
+        result = run_once(
+            settings.database_path,
+            user_agent=settings.user_agent,
+            delay_seconds=settings.crawl_delay_seconds,
+            batch_size=args.limit or settings.crawl_batch_size,
+            recrawl_after_days=settings.recrawl_after_days,
+            force_seeds=args.seeds,
+        )
+        print(result.summary())
+    elif args.command == "import":
+        from .crawler.runner import import_one
+
+        data = import_one(settings.database_path, args.product_no, user_agent=settings.user_agent)
+        print(
+            f"{data['title']} — {data['free_episodes']}/{data['total_episodes']}{data['unit']} 무료"
+        )
+
+
+if __name__ == "__main__":
+    main()

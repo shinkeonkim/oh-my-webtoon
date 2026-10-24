@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>{% block title %}my-webtoon{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">my-webtoon</a>
+    <nav>
+      <a href="/" class="{{ 'on' if request.url.path == '/' }}">추천</a>
+      <a href="/rate" class="{{ 'on' if request.url.path == '/rate' }}">평가하기</a>
+      <a href="/me" class="{{ 'on' if request.url.path == '/me' }}">내 기록</a>
+      <a href="/crawl" class="{{ 'on' if request.url.path == '/crawl' }}">수집</a>
+      {% if auth_enabled %}
+      <form method="post" action="/logout" class="inline"><button class="link">로그아웃</button></form>
+      {% endif %}
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    데이터 출처: <a href="https://series.naver.com/comic/home.series" target="_blank" rel="noopener">네이버 시리즈</a> · 개인 학습용 추천기
+  </footer>
+</body>
+</html>

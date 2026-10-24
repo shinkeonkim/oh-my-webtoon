@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}수집 · my-webtoon{% endblock %}
+{% block content %}
+<h1>데이터 수집</h1>
+
+<section class="stats">
+  <div><b>{{ stats.comics }}</b><span>수집된 작품</span></div>
+  <div><b>{{ stats.get('pending', 0) }}</b><span>대기 중</span></div>
+  <div><b>{{ stats.get('skipped', 0) }}</b><span>건너뜀 (19금)</span></div>
+  <div><b>{{ stats.get('failed', 0) }}</b><span>실패</span></div>
+</section>
+
+<p>
+  {% if running %}<b>지금 수집 중이에요.</b> 새로고침하면 숫자가 늘어나요.
+  {% else %}
+  <form method="post" action="/crawl/run" class="inline"><button class="btn">지금 한 번 수집하기</button></form>
+  {% endif %}
+</p>
+<p class="muted">
+  자동 수집: {{ '켜짐 — %s시간마다' % settings.crawl_interval_hours if settings.crawl_enabled else '꺼짐 (CRAWL_ENABLED=1 로 켜기)' }}
+  · 한 번에 최대 {{ settings.crawl_batch_size }}개 · 요청 간격 {{ settings.crawl_delay_seconds }}초
+  · {{ settings.recrawl_after_days }}일 지난 작품은 다시 수집 · 시드 갱신 {{ (seeds_at or '아직')[:16] }}
+</p>
+
+<h2>최근 실행</h2>
+<table class="runs">
+  <thead><tr><th>#</th><th>시작</th><th>끝</th><th>수집</th><th>신규 발견</th><th>실패</th><th>메모</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr><td>{{ r.id }}</td><td>{{ r.started_at[:16] }}</td><td>{{ (r.finished_at or '진행 중')[:16] }}</td>
+        <td>{{ r.fetched }}</td><td>{{ r.discovered }}</td><td>{{ r.failed }}</td><td class="note">{{ r.note or '' }}</td></tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">아직 실행 기록이 없어요.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

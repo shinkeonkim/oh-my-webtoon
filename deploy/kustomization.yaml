@@ -1,0 +1,17 @@
+# ArgoCD(oh-my-homelab 의 helm-charts/apps/my-webtoon.yaml)가 이 디렉터리를 kustomize 로 렌더한다.
+# 시크릿(my-webtoon-secrets)은 여기 없다 — oh-my-homelab 의 helm-charts/secrets/my-webtoon (SOPS).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: my-webtoon
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: my-webtoon
+images:
+  - name: ghcr.io/shinkeonkim/my-webtoon
+    newTag: latest # release.yml 이 main push 마다 sha-xxxxxxx 로 바꿔 커밋한다

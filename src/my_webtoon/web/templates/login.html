@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}로그인 · my-webtoon{% endblock %}
+{% block content %}
+<section class="login">
+  <h1>my-webtoon</h1>
+  <form method="post" action="/login">
+    <input type="password" name="password" placeholder="비밀번호" autofocus required>
+    <button class="btn">들어가기</button>
+  </form>
+  {% if error %}<p class="error">비밀번호가 달라요.</p>{% endif %}
+</section>
+{% endblock %}

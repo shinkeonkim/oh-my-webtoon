@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "_card.html" import card with context %}
+{% block content %}
+
+{% if stats.comics == 0 %}
+<section class="notice">
+  아직 수집한 작품이 없어요. <a href="/crawl">수집 화면</a>에서 크롤링을 먼저 돌려 주세요.
+</section>
+{% elif not recs %}
+<section class="notice">
+  <p><b>내가 본 웹툰을 먼저 평가해 주세요.</b> 좋아한 작품(★3 이상 또는 "봤음")이 하나라도 있으면 추천이 시작돼요.</p>
+  <p><a class="btn" href="/rate">검색해서 평가하기 →</a></p>
+</section>
+{% if popular %}
+<h2>많이 본 작품 — 본 게 있다면 바로 평가해 보세요</h2>
+<div class="grid">
+  {% for comic in popular %}{{ card(comic, ratings.get(comic.product_no)) }}{% endfor %}
+</div>
+{% endif %}
+
+{% else %}
+<details class="tuning" {% if 'tuned' in request.query_params %}open{% endif %}>
+  <summary>점수 공식 조정하기 <small>(최종 = 유사도 × (1 + 무료×a + 회차×b + 평점×c))</small></summary>
+  <form method="get" action="/">
+    <input type="hidden" name="tuned" value="1">
+    <label>무료 회차 가중치 a <input type="number" step="0.1" min="0" name="free_weight" value="{{ opts.free_weight }}"></label>
+    <label>총 회차 가중치 b <input type="number" step="0.1" min="0" name="episode_weight" value="{{ opts.episode_weight }}"></label>
+    <label>네이버 평점 가중치 c <input type="number" step="0.1" min="0" name="rating_weight" value="{{ opts.rating_weight }}"></label>
+    <label>유료 위주 기준 (무료 N화 이하) <input type="number" min="0" name="stingy_threshold" value="{{ opts.stingy_threshold }}"></label>
+    <label class="check"><input type="checkbox" name="sink" value="1" {% if opts.sink_stingy %}checked{% endif %}> 유료 위주 작품은 맨 아래로</label>
+    <label class="check"><input type="checkbox" name="adult" value="1" {% if opts.include_adult %}checked{% endif %}> 성인 작품 포함</label>
+    <button class="btn">다시 계산</button> <a href="/">기본값</a>
+  </form>
+</details>
+
+<p class="meta-line">평가 {{ ratings | length }}개 기반 · 수집된 작품 {{ stats.comics }}개 중 추천</p>
+<div class="grid">
+  {% for rec in recs %}{{ card(rec.comic, ratings.get(rec.comic.product_no), rec) }}{% endfor %}
+</div>
+<nav class="pager">
+  {% if page > 0 %}<a href="/?{{ query_string }}&page={{ page - 1 }}">← 이전</a>{% endif %}
+  {% if has_next %}<a href="/?{{ query_string }}&page={{ page + 1 }}">다음 →</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

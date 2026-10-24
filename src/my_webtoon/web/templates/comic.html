@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_card.html" import card with context %}
+{% block title %}{{ comic.title }} · my-webtoon{% endblock %}
+{% block content %}
+<section class="detail">
+  {% if comic.thumbnail_url %}<img class="cover" src="{{ comic.thumbnail_url }}" alt="" referrerpolicy="no-referrer">{% endif %}
+  <div>
+    <h1>{{ comic.title }}</h1>
+    <p class="sub">
+      {{ comic.authors | join(' · ') }}
+      {% if comic.publisher %}<span class="dot">·</span>{{ comic.publisher }}{% endif %}
+      {% if comic.age_rating %}<span class="dot">·</span>{{ comic.age_rating }}{% endif %}
+    </p>
+    <p class="badges">
+      <span class="badge {{ 'free-all' if comic.is_all_free else ('free-few' if stingy else 'free') }}">{{ free_label(comic) }}</span>
+      {% if comic.total_episodes %}<span class="badge">{{ episodes_label(comic) }}</span>{% endif %}
+      {% if comic.status %}<span class="badge">{{ comic.status }}</span>{% endif %}
+      {% if comic.genre %}<span class="badge">{{ comic.genre }}</span>{% endif %}
+      {% if comic.naver_rating %}<span class="badge">네이버 ★ {{ '%.1f' % comic.naver_rating }}</span>{% endif %}
+      {% if comic.promo_label %}<span class="badge promo">⏰ {{ comic.promo_label }}</span>{% endif %}
+    </p>
+    <p class="tags">{% for t in comic.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</p>
+    <p class="synopsis">{{ comic.synopsis }}</p>
+    <p class="math">보정 배수 {{ '%.2f' % boost }}{% if stingy %} · <span class="warn">유료 위주 작품</span>{% endif %}
+      · 수집 {{ comic.crawled_at[:10] }}</p>
+    {% include "_rate.html" %}
+    <p><a class="btn" href="{{ comic.url }}" target="_blank" rel="noopener">네이버 시리즈에서 보기 ↗</a></p>
+  </div>
+</section>
+
+<h2>이 작품과 비슷한 작품</h2>
+<div class="grid">
+  {% for rec in similar %}{{ card(rec.comic, ratings.get(rec.comic.product_no), rec) }}{% endfor %}
+</div>
+{% endblock %}

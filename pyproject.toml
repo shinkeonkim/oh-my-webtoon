@@ -1,0 +1,46 @@
+[project]
+name = "my-webtoon"
+version = "0.1.0"
+description = "네이버 시리즈 코믹스 데이터로 만드는 나만의 웹툰 추천기"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.12",
+    "itsdangerous>=2.2",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "scikit-learn>=1.5",
+    "numpy>=2.0",
+]
+
+[project.scripts]
+my-webtoon = "my_webtoon.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/my_webtoon"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# E501: 줄 길이는 formatter 에 맡긴다 (한글 주석이 길어지는 건 허용)
+# B008: FastAPI 의 Depends()/Form() 기본값 관용구
+ignore = ["E501", "B008"]

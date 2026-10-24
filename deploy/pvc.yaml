@@ -1,0 +1,12 @@
+# SQLite 파일 하나. 단일 인스턴스라 storage 레벨 복제가 의미 없어 longhorn-r1
+# (oh-my-homelab docs/setup/새_앱_배포_체크리스트.md 1번).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-webtoon-data
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn-r1
+  resources:
+    requests:
+      storage: 2Gi

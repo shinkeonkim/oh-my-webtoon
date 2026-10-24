@@ -1,0 +1,49 @@
+# main 에 push 되면 이미지를 빌드해 ghcr.io 에 올리고,
+# deploy/kustomization.yaml 의 이미지 태그를 새 sha 로 바꿔 커밋한다 → ArgoCD 가 감지해 롤아웃.
+name: Release
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["deploy/**", "docs/**", "**.md"]
+  workflow_dispatch:
+permissions:
+  contents: write
+  packages: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen && uv run pytest -q
+  publish:
+    needs: test
+    runs-on: ubuntu-latest   # 홈랩 ARC 러너엔 Docker 데몬이 없다
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: tag
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
+      - name: Bump image tag in deploy/
+        run: |
+          cd deploy
+          kustomize edit set image "ghcr.io/shinkeonkim/my-webtoon=ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "deploy: 이미지를 ${{ steps.tag.outputs.tag }} 로 올린다" || exit 0
+          git push

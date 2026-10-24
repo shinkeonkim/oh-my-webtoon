@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_card.html" import card with context %}
+{% block title %}평가하기 · my-webtoon{% endblock %}
+{% block content %}
+<h1>내가 본 웹툰 평가하기</h1>
+
+<form class="search" method="get" action="/rate">
+  <input type="search" name="q" value="{{ q }}" placeholder="제목이나 작가로 검색" autofocus>
+  <button class="btn">검색</button>
+</form>
+
+<details class="import" {% if error or (q and not results) %}open{% endif %}>
+  <summary>목록에 없나요? 네이버 시리즈 링크로 바로 가져오기</summary>
+  <form method="post" action="/import">
+    <input name="url" placeholder="https://series.naver.com/comic/detail.series?productNo=..." required>
+    <button class="btn">가져오기</button>
+  </form>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+</details>
+
+{% if q %}
+  <h2>"{{ q }}" 검색 결과 {{ results | length }}개</h2>
+  {% if not results %}<p class="muted">아직 수집되지 않은 작품일 수 있어요. 위에서 링크로 가져와 보세요.</p>{% endif %}
+  <div class="grid">
+    {% for comic in results %}{{ card(comic, ratings.get(comic.product_no)) }}{% endfor %}
+  </div>
+{% elif popular %}
+  <h2>많이 본 작품부터 훑어보기</h2>
+  <div class="grid">
+    {% for comic in popular %}{{ card(comic, ratings.get(comic.product_no)) }}{% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

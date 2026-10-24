@@ -1,0 +1,24 @@
+{#- 별점 위젯. 버튼을 누르면 HTMX 가 POST 하고, 서버가 이 조각을 다시 렌더링해 통째로 바꾼다.
+    필요한 변수: comic, rating(없으면 None) -#}
+{%- set no = comic.product_no -%}
+<div class="rate{% if rating %} rated-{{ rating.kind }}{% endif %}" hx-target="this" hx-swap="outerHTML">
+  <span class="stars" role="group" aria-label="별점">
+    {%- for s in range(1, 6) %}
+    <button type="button" class="star{% if rating and rating.score and rating.score >= s %} on{% endif %}"
+            hx-post="/ratings/{{ no }}" hx-vals='{"kind": "rated", "score": {{ s }}}'
+            title="{{ s }}점">★</button>
+    {%- endfor %}
+  </span>
+  <button type="button" class="chip{% if rating and rating.kind == 'seen' %} on{% endif %}"
+          hx-post="/ratings/{{ no }}" hx-vals='{"kind": "seen"}'>봤음</button>
+  <button type="button" class="chip{% if rating and rating.kind == 'dismissed' %} on{% endif %}"
+          hx-post="/ratings/{{ no }}" hx-vals='{"kind": "dismissed"}'>관심없음</button>
+  {%- if rating %}
+  <button type="button" class="chip ghost" hx-post="/ratings/{{ no }}/delete">취소</button>
+  <span class="saved">
+    {%- if rating.kind == 'rated' %}★{{ rating.score }} 저장됨
+    {%- elif rating.kind == 'seen' %}봤음으로 저장됨
+    {%- else %}다시 추천하지 않아요{% endif -%}
+  </span>
+  {%- endif %}
+</div>

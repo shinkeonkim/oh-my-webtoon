@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_card.html" import card with context %}
+{% block title %}내 기록 · my-webtoon{% endblock %}
+{% block content %}
+<h1>내 평가 기록 <small>{{ items | length }}개</small></h1>
+{% if not items %}<p class="muted">아직 평가한 작품이 없어요. <a href="/rate">평가하러 가기</a></p>{% endif %}
+
+{% for group, label in [('rated', '별점 준 작품'), ('seen', '봤음 (별점 없음)'), ('dismissed', '관심 없음')] %}
+  {% set rows = items | selectattr('0.kind', 'equalto', group) | list %}
+  {% if rows %}
+  <h2>{{ label }} <small>{{ rows | length }}</small></h2>
+  <div class="grid">
+    {% for rating, comic in rows | sort(attribute='0.score', reverse=True) %}{{ card(comic, rating) }}{% endfor %}
+  </div>
+  {% endif %}
+{% endfor %}
+{% endblock %}
