@@ -314,3 +314,35 @@ def test_infinite_scroll_carries_snapshot(client, library):
     client.post("/reviews/100", data={"score": "0"})  # 스크롤 중 평가
     more = client.get("/", params={"snap": snap, "page": "1"}, headers=HX).text
     assert not shown & set(re.findall(r'href="/comic/(\d+)"', more))
+
+
+def test_theme_defaults_to_system(client):
+    page = client.get("/").text
+    assert "data-theme=" not in page.split(">", 2)[1]  # <html> 에 속성 없음 → OS 설정을 따른다
+    assert 'data-theme-option="system" class="is-on"' in page
+
+
+def test_theme_choice_is_kept_in_cookie(client):
+    res = client.post(
+        "/theme", data={"theme": "light", "next": "/news?x=1"}, follow_redirects=False
+    )
+    assert res.status_code == 303 and res.headers["location"] == "/news?x=1"
+    assert client.cookies.get("theme") == "light"
+    page = client.get("/").text
+    assert '<html lang="ko" data-theme="light">' in page
+    assert 'data-theme-option="light" class="is-on"' in page
+    # HTMX 는 쿠키만 바꾸고 화면은 스크립트가 바꾼다
+    assert client.post("/theme", data={"theme": "dark"}, headers=HX).status_code == 204
+    assert '<html lang="ko" data-theme="dark">' in client.get("/comics").text
+    client.post("/theme", data={"theme": "system"}, headers=HX)
+    assert "data-theme=" not in client.get("/").text.split(">", 2)[1]
+
+
+def test_theme_rejects_unknown_value_and_foreign_redirect(client):
+    assert client.post("/theme", data={"theme": "pink"}).status_code == 400
+    res = client.post(
+        "/theme", data={"theme": "dark", "next": "//evil.example"}, follow_redirects=False
+    )
+    assert res.headers["location"] == "/"
+    client.cookies.set("theme", "pink")  # 손으로 바꾼 쿠키는 무시
+    assert "data-theme=" not in client.get("/").text.split(">", 2)[1]

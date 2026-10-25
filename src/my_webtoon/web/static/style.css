@@ -52,8 +52,10 @@
   --control-h-sm: 30px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 2px 8px rgb(0 0 0 / 0.04);
 }
+/* 다크 토큰. 두 번 적는 이유: OS 가 다크일 때(사용자가 '라이트'를 고르지 않았으면) + 사용자가 '다크'를 골랐을 때.
+   <html data-theme> 은 사용자 메뉴의 테마 선택이 정한다 (app.py THEMES). 값을 바꿀 땐 두 곳을 같이. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #111113;
     --surface: #19191c;
@@ -74,6 +76,27 @@
     --promo-soft: #261d3d;
     --shadow: none;
   }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111113;
+  --surface: #19191c;
+  --surface-2: #222226;
+  --text: #ececef;
+  --text-2: #b4b4bb;
+  --text-3: #7d7d86;
+  --line: #2a2a2f;
+  --line-strong: #3a3a40;
+  --accent: #2fd189;
+  --accent-strong: #5ee0a6;
+  --accent-soft: #143024;
+  --on-accent: #0b1f15;
+  --star-off: #3a3a40;
+  --warn: #fb923c;
+  --warn-soft: #36210f;
+  --promo: #b69cff;
+  --promo-soft: #261d3d;
+  --shadow: none;
 }
 
 /* 2. 기본 ------------------------------------------------------------------ */
@@ -305,7 +328,18 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgb(0 0 0 / 0.08);
 }
 .usermenu__panel form { margin: 0; }
-.usermenu__panel button { color: var(--warn); }
+.usermenu__panel .usermenu__logout { color: var(--warn); }
+/* 테마 고르기: 메뉴 안의 작은 3칸 세그먼트 */
+.usermenu__theme {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 3px; margin: var(--space-1) 0;
+  background: var(--surface-2); border-radius: var(--radius-sm);
+}
+.usermenu__panel .usermenu__theme button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 5px 6px;
+  font-size: var(--text-xs); color: var(--text-3); text-align: center;
+}
+.usermenu__panel .usermenu__theme button:hover { background: var(--surface); color: var(--text); }
+.usermenu__panel .usermenu__theme button.is-on { background: var(--surface); color: var(--text); font-weight: 700; box-shadow: var(--shadow); }
 .subnav { margin-bottom: var(--space-4); }
 
 /* 모바일 하단 탭바 — 좁은 화면에선 위 가로 메뉴 대신 엄지가 닿는 아래쪽에 */

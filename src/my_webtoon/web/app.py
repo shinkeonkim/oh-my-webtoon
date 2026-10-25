@@ -24,6 +24,7 @@ HTMX 로 부분 교체한다 — 프론트엔드 빌드 도구 없이 파이썬 
     GET  /settings               비밀번호 변경, 평가 내보내기/가져오기, 👑 사용자 추가·백업
     GET  /crawl, POST /crawl/run 수집·운영 상태 (응답 시간 포함) / 👑 즉시 실행
     GET  /login, POST /login, POST /logout, GET /healthz   🔓
+    POST /theme                  🔓 화면 테마 (자동/라이트/다크) — 쿠키, 사용자 메뉴에서
 """
 
 from __future__ import annotations
@@ -58,7 +59,11 @@ from .prom import Metrics
 
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
-ALWAYS_PUBLIC = ("/login", "/demo", "/static", "/healthz", "/readyz")
+ALWAYS_PUBLIC = ("/login", "/demo", "/static", "/healthz", "/readyz", "/theme")
+# 화면 테마. DB 가 아니라 쿠키에 둔다 — 로그인 전 화면에도 쓰고, 기기마다(폰은 다크·PC 는 라이트) 다를 수 있으니까.
+# system 이면 OS 설정(prefers-color-scheme)을 따른다. 서버가 <html data-theme> 으로 그려서 깜빡임이 없다.
+THEMES = ("system", "light", "dark")
+THEME_COOKIE = "theme"
 PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui")  # 읽기 전용 공개 화면
 NEWS_DAYS = 30  # 소식 화면이 보여 주는 기간
 REVIEWED_FILTERS = {
@@ -245,6 +250,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ctx.setdefault("user", user)
         ctx.setdefault("authed", user is not None)
         ctx.setdefault("can_logout", not request.state.open_mode)
+        ctx.setdefault("theme", theme_of(request))
         return templates.TemplateResponse(request, name, ctx)
 
     # -- 추천 -----------------------------------------------------------------
@@ -875,6 +881,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.session.clear()
         return RedirectResponse("/comics", status_code=303)
 
+    @app.post("/theme")
+    async def set_theme(request: Request):
+        """HTMX 면 쿠키만 바꾼다(화면은 base.html 의 스크립트가 바로 바꾼다). JS 가 없으면 보던 화면으로 돌아간다."""
+        form = await request.form()
+        theme = form.get("theme", "")
+        if theme not in THEMES:
+            raise HTTPException(400, "모르는 테마예요")
+        back = str(form.get("next") or "/")
+        if not back.startswith("/") or back.startswith("//"):  # 다른 사이트로 보내지 않게
+            back = "/"
+        response = (
+            Response(status_code=204)
+            if request.headers.get("HX-Request")
+            else RedirectResponse(back, status_code=303)
+        )
+        response.set_cookie(THEME_COOKIE, theme, max_age=60 * 60 * 24 * 365 * 2, samesite="lax")
+        return response
+
     @app.get("/ui", response_class=HTMLResponse)
     def styleguide(request: Request, conn=Depends(get_conn)):
         """공통 컴포넌트 모음 (스타일 가이드). 새 화면을 만들 때 여기 있는 것만 쓴다."""
@@ -989,6 +1013,11 @@ def parse_product_no(text: str) -> int | None:
 
 
 MOBILE_UA = re.compile(r"Android|iPhone|iPad|iPod|Mobile")
+
+
+def theme_of(request: Request) -> str:
+    theme = request.cookies.get(THEME_COOKIE, "system")
+    return theme if theme in THEMES else "system"
 
 
 def is_mobile(request: Request) -> bool:
