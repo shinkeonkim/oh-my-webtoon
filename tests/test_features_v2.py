@@ -374,6 +374,7 @@ def test_prometheus_metrics(client, library):
     client.get("/comics")
     client.get("/comic/1")
     client.get("/없는-주소")
+    client.get("/static/style.css")
     client.post("/reviews/1", data={"status": "watching"}, headers=HX)
     with db.session(library) as conn:
         run = db.start_run(conn)
@@ -385,7 +386,8 @@ def test_prometheus_metrics(client, library):
         in text
     )
     assert 'route="(unmatched)"' in text and "없는" not in text  # 라벨이 주소마다 늘지 않는다
-    assert "/healthz" not in text
+    assert "/healthz" not in text and "/static" not in text
+    assert 'route="(unmatched)",status="200"' not in text  # 정적 파일이 (unmatched) 로 새지 않는다
     assert 'mywebtoon_comics{status="연재중"}' in text
     assert 'mywebtoon_reviews{status="watching"} 1.0' in text
     assert 'mywebtoon_crawl_last_pages{result="skipped"} 2.0' in text

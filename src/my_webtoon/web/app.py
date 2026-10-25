@@ -51,7 +51,7 @@ from ..config import Settings, load_settings
 from ..crawler import runner
 from ..recommender import Engine, ScoringOptions
 from ..recommender import scoring as scoring_mod
-from . import auth
+from . import auth, prom
 from .metrics import RequestLog
 from .prom import Metrics
 
@@ -206,7 +206,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         elapsed = time.perf_counter() - started
         request_log.add(path or request.url.path, elapsed * 1000, response.status_code)
         # Prometheus 라벨은 라우트 패턴만 — 없는 주소(404)를 그대로 넣으면 라벨이 끝없이 늘어난다
-        prometheus.observe(path or "(unmatched)", request.method, response.status_code, elapsed)
+        # /static 은 마운트라 route 가 안 잡혀서, 거르는 건 실제 주소로 한다
+        if not request.url.path.startswith(prom.SKIP):
+            prometheus.observe(path or "(unmatched)", request.method, response.status_code, elapsed)
         return response
 
     def get_conn() -> Iterator:

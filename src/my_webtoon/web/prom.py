@@ -35,6 +35,11 @@ from .. import db
 
 log = logging.getLogger(__name__)
 PREFIX = "mywebtoon"
+SKIP = (
+    "/static",
+    "/healthz",
+    "/readyz",
+)  # 프로브·정적 파일은 빼야 실제 화면 지표가 보인다 (metrics.py 와 같은 기준)
 BUCKETS = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
 
 
@@ -191,8 +196,6 @@ class Metrics:
         self._server = None
 
     def observe(self, route: str, method: str, status: int, seconds: float) -> None:
-        if route.startswith(("/static", "/healthz", "/readyz")):
-            return  # 프로브·정적 파일은 빼야 실제 화면 지표가 보인다 (metrics.py 와 같은 기준)
         self.requests.labels(route, method, str(status)).inc()
         self.latency.labels(route).observe(seconds)
 
