@@ -6,13 +6,15 @@
 {% call ui.page_header('평가하기', '본 작품을 찾아 별점이나 상태를 남겨 주세요') %}{{ ui.button('빠른 평가', 'primary', href='/quick', icon_name='bolt') }}{% if not user.is_demo %}{{ ui.button('시리즈 내 서재에서 가져오기', 'secondary', href='/import/series', icon_name='external') }}{% endif %}{% endcall %}
 <form class="toolbar" method="get" action="/rate">
   <span class="input-icon">{{ ui.icon('search') }}<input class="input" type="search" name="q" value="{{ q }}" placeholder="제목이나 작가로 검색" autofocus></span>
+  {%- if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
   {{ ui.button('검색', 'primary') }}
 </form>
+<div class="filters mt-3">{{ ui.tabs(status_tabs, '내가 남긴 상태') }}</div>
 
 {% if user.is_demo %}
 {% if error %}<p class="alert alert--error">{{ error }}</p>{% endif %}
 {% else %}
-<details class="tuning panel"{{ ' open' if error or (q and not results) }}>
+<details class="tuning panel"{{ ' open' if error or (q and not comics) }}>
   <summary>{{ ui.icon('chevron', 14) }}목록에 없나요? 네이버 시리즈 링크로 가져오기</summary>
   <form class="toolbar mt-3 m-0" method="post" action="/import">
     <span class="input-icon">{{ ui.icon('external') }}<input class="input" name="url" placeholder="https://series.naver.com/comic/detail.series?productNo=…" required></span>
@@ -28,12 +30,11 @@
 </details>
 {% endif %}
 
-{% if q %}
-  <h2>"{{ q }}" 검색 결과 <span class="muted">{{ results | length }}</span></h2>
-  {% if not results %}{{ ui.empty('아직 수집되지 않은 작품일 수 있어요. 위에서 링크로 가져와 보세요.') }}{% endif %}
-  <div class="grid">{% for comic in results %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}</div>
-{% elif popular %}
+{% if filtered %}
+  <h2>{% if q %}"{{ q }}" 검색 결과{% else %}{{ status_label }}{% endif %} <span class="muted">{{ total }}</span></h2>
+  {% if not comics %}{{ ui.empty('아직 수집되지 않은 작품일 수 있어요. 위에서 링크로 가져와 보세요.' if q and not status else '조건에 맞는 작품이 없어요.') }}{% endif %}
+{% else %}
   <h2>많이 본 작품부터 훑어보기</h2>
-  <div class="grid">{% for comic in popular %}{{ card(comic, reviews.get(comic.product_no)) }}{% endfor %}</div>
 {% endif %}
+<div class="grid">{% include "_comics_page.html" %}</div>
 {% endblock %}

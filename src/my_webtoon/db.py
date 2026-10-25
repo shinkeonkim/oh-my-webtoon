@@ -296,14 +296,28 @@ def list_comics(
     free: str = "",
     status: str = "",
     hide_reviewed_by: int | None = None,
+    review_of: int | None = None,
+    review_status: str = "",
     limit: int = 40,
     offset: int = 0,
 ) -> tuple[list[Comic], int]:
-    """수집 목록 화면용. (현재 페이지 작품들, 조건에 맞는 전체 개수)."""
+    """수집 목록 화면용. (현재 페이지 작품들, 조건에 맞는 전체 개수).
+
+    review_of + review_status: 그 사용자가 남긴 상태로 거른다 (/rate). 'none' 은 상태가 없는 작품
+    — 평가가 아예 없거나 별점만 있는 작품.
+    """
     where, params = [], []
     if query.strip():
         where.append("(c.title LIKE ? OR c.authors LIKE ?)")
         params += [f"%{query.strip()}%"] * 2
+    if review_of is not None and (review_status == "none" or review_status in STATUSES):
+        mine = "SELECT product_no FROM reviews WHERE user_id = ? AND status "
+        if review_status == "none":
+            where.append(f"c.product_no NOT IN ({mine}IS NOT NULL)")
+            params.append(review_of)
+        else:
+            where.append(f"c.product_no IN ({mine}= ?)")
+            params += [review_of, review_status]
     if genre:
         where.append("c.genre = ?")
         params.append(genre)
@@ -323,11 +337,35 @@ def list_comics(
         params.append(hide_reviewed_by)
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     order = COMIC_SORTS.get(sort, COMIC_SORTS["popular"])[1]
+    order_params: list = []
+    if sort == "search":  # 검색: 제목이 딱 맞는 작품을 맨 앞에
+        order, order_params = "(c.title = ?) DESC, " + COMIC_SORTS["popular"][1], [query.strip()]
     total = conn.execute(f"SELECT COUNT(*) FROM comics c{clause}", params).fetchone()[0]
     rows = conn.execute(
-        _COMIC_SELECT + clause + f" ORDER BY {order} LIMIT ? OFFSET ?", [*params, limit, offset]
+        _COMIC_SELECT + clause + f" ORDER BY {order} LIMIT ? OFFSET ?",
+        [*params, *order_params, limit, offset],
     ).fetchall()
     return [Comic.from_row(r) for r in rows], total
+
+
+def review_status_counts(conn: sqlite3.Connection, user_id: int, query: str = "") -> dict[str, int]:
+    """/rate 상태 탭의 개수. 검색어가 있으면 그 결과 안에서 센다. 'none' = 상태 없는 작품."""
+    where, params = "", [user_id]
+    if query.strip():
+        where = " WHERE c.title LIKE ? OR c.authors LIKE ?"
+        params += [f"%{query.strip()}%"] * 2
+    rows = conn.execute(
+        "SELECT r.status, COUNT(*) FROM comics c"
+        " LEFT JOIN reviews r ON r.product_no = c.product_no AND r.user_id = ?"
+        + where
+        + " GROUP BY r.status",
+        params,
+    ).fetchall()
+    counts = {k: 0 for k in STATUSES}
+    counts["none"] = 0
+    for status, n in rows:
+        counts[status if status in STATUSES else "none"] += n
+    return counts
 
 
 def genres(conn: sqlite3.Connection) -> list[str]:

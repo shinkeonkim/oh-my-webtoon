@@ -209,6 +209,7 @@ class Engine:
         opts: ScoringOptions,
         user_id: int | None = None,
         limit: int = 30,
+        offset: int = 0,
     ) -> list[Comic]:
         """콜드 스타트: 많이 본 작품 중 무료 많은 순. 여기서 '봤던 것'을 골라 평가하면 된다."""
         self._load(conn)
@@ -220,7 +221,7 @@ class Engine:
             and (opts.include_adult or not scoring.is_adult(c))
         ]
         candidates.sort(key=lambda c: -math.log1p(c.popularity or 0) * scoring.boost(c, opts))
-        return self._one_per_work(candidates)[:limit]
+        return self._one_per_work(candidates)[offset : offset + limit]
 
     def quick_queue(self, conn: sqlite3.Connection, user_id: int, limit: int = 20) -> list[Comic]:
         """빠른 평가에서 물어볼 작품 순서. 목표는 '봤을 법한' 작품을 먼저 보여서 평가를 빨리 모으는 것.

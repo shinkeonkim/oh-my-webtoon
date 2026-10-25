@@ -319,3 +319,49 @@ def test_rated_card_does_not_resemble_itself(library):
         recs = Engine().recommend(conn, ME, ScoringOptions(reviewed="include", sink_stingy=False))
     for rec in recs:
         assert rec.because is None or rec.because.product_no != rec.comic.product_no
+
+
+# -- 평가하기: 상태 필터 · 무한 스크롤 · 가져오기 기본값 ---------------------------------
+
+
+def test_rate_status_filter_combines_with_search(client, library):
+    client.post("/reviews/1", data={"status": "watching"}, headers=HX)  # 천마 회귀록
+    client.post("/reviews/2", data={"status": "seen"}, headers=HX)  # 검황 회귀전
+    client.post("/reviews/4", data={"score": "8"}, headers=HX)  # 별점만 → 상태 없음
+
+    def titles(**params):
+        page = client.get("/rate", params=params).text
+        return {t for t in ("천마 회귀록", "검황 회귀전", "화산 귀환 무사") if t in page}
+
+    assert titles(status="watching") == {"천마 회귀록"}
+    assert titles(q="회귀", status="seen") == {"검황 회귀전"}
+    assert titles(q="회귀", status="none") == set()  # 1·2는 상태가 있다
+    assert "천마 회귀록" not in client.get("/rate", params={"status": "none"}).text
+    assert "화산 귀환 무사" in client.get("/rate", params={"status": "none"}).text
+
+    page = client.get("/rate", params={"q": "회귀"}).text
+    assert 'href="/rate?q=%ED%9A%8C%EA%B7%80&amp;status=watching"' in page  # 탭이 검색어를 유지
+    assert 'name="status" value' not in page  # 상태 탭을 안 골랐으면 숨은 칸도 없다
+    with db.session(library) as conn:
+        counts = db.review_status_counts(conn, ME, "회귀")
+    assert counts["watching"] == 1 and counts["seen"] == 1
+
+
+def test_rate_infinite_scroll(client, monkeypatch):
+    import importlib
+
+    monkeypatch.setattr(importlib.import_module("my_webtoon.web.app"), "PER_PAGE", 2)
+    first = client.get("/rate", params={"status": "none"}).text
+    assert 'hx-get="/rate?status=none&amp;page=1"' in first
+    more = client.get("/rate", params={"status": "none", "page": 1}, headers=HX).text
+    assert "<html" not in more and "card" in more
+
+    popular = client.get("/rate").text  # 조건 없는 '많이 본 작품'도 이어서 불러온다
+    assert 'hx-get="/rate?page=1"' in popular
+
+
+def test_series_import_defaults_to_watching(client, library):
+    preview = client.get("/import/series", params={"nos": "1"}).text
+    assert 'value="watching" id="status-watching" checked' in preview
+    client.post("/import/series", data={"no": ["1"]})
+    assert review(library, 1).status == "watching"

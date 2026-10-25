@@ -66,6 +66,12 @@ REVIEWED_FILTERS = {
 }  # 추천의 ?reviewed=
 SERIES_IMPORT_MAX = 2000  # 북마클릿 한 번에 받는 작품 번호 수
 PER_PAGE = 30
+# /rate?status=...  내가 남긴 상태로 거르기. 'none' 은 상태 없는 작품(안 본 것 + 별점만 남긴 것).
+RATE_STATUS_FILTERS = {
+    "": "전체",
+    "none": "상태 없음",
+    **{k: v for k, v in db.STATUSES.items()},
+}
 SCORE_FILTERS = {  # /users/{name}?score=...  점수는 0~10(=별 반 개 단위). 세부 점수만 있으면 평균을 반올림.
     "10": ("★5", lambda s: s is not None and round(s) == 10),
     "9": ("★4.5", lambda s: s is not None and round(s) == 9),
@@ -396,17 +402,66 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # -- 평가하기 (검색 + 가져오기) -------------------------------------------------
 
     @app.get("/rate", response_class=HTMLResponse)
-    def rate_page(request: Request, q: str = "", conn=Depends(get_conn), error: str = ""):
+    def rate_page(
+        request: Request,
+        q: str = "",
+        status: str = "",
+        page: int = 0,
+        conn=Depends(get_conn),
+        error: str = "",
+    ):
         user = me(request)
-        results = db.search_comics(conn, q) if q.strip() else []
-        opts = options_from_query(request)
+        if status not in RATE_STATUS_FILTERS:
+            status = ""
+        filtered = bool(q.strip() or status)
+        if filtered:
+            # 검색과 상태 필터는 같이 걸린다: "회귀" + "보는 중" = 내가 보는 중인 작품 중 제목에 회귀
+            comics, total = db.list_comics(
+                conn,
+                query=q,
+                sort="search" if q.strip() else "popular",
+                review_of=user.id,
+                review_status=status,
+                limit=PER_PAGE,
+                offset=page * PER_PAGE,
+            )
+            has_next = (page + 1) * PER_PAGE < total
+        else:
+            # 아무 조건이 없으면 '많이 본 작품부터 훑어보기' (평가한 작품은 빠진다)
+            comics = engine.popular(
+                conn, options_from_query(request), user.id, limit=PER_PAGE, offset=page * PER_PAGE
+            )
+            total, has_next = None, len(comics) == PER_PAGE
+        ctx = dict(
+            comics=comics,
+            page=page,
+            has_next=has_next,
+            reviews=db.all_reviews(conn, user.id),
+            query_string=_query_without(request, "page"),
+            base_path="/rate",
+        )
+        if request.headers.get("HX-Request") and page > 0:
+            return render(request, "_comics_page.html", **ctx)
+        counts = db.review_status_counts(conn, user.id, q)
+        status_tabs = [
+            (
+                "/rate?"
+                + urlencode({**({"q": q} if q.strip() else {}), **({"status": k} if k else {})}),
+                label,
+                counts.get(k) if k else None,
+                status == k,
+            )
+            for k, label in RATE_STATUS_FILTERS.items()
+        ]
         return render(
             request,
             "rate.html",
             q=q,
-            results=results,
-            reviews=db.all_reviews(conn, user.id),
-            popular=[] if q.strip() else engine.popular(conn, opts, user.id, limit=24),
+            status=status,
+            status_label=RATE_STATUS_FILTERS[status],
+            filtered=filtered,
+            total=total,
+            status_tabs=status_tabs,
             # 서버가 네이버 검색을 대신할 수는 없다(robots.txt 가 /search 를 막음).
             # 대신 내 브라우저에서 검색 결과를 열어 링크를 복사해 오게 한다.
             naver_search_url=(
@@ -415,6 +470,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else None
             ),
             error=error,
+            **ctx,
         )
 
     @app.post("/import")
@@ -470,7 +526,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def series_import_save(request: Request, conn=Depends(get_conn)):
         user = me(request)
         form = await request.form()
-        status = form.get("status") if form.get("status") in db.STATUSES else "seen"
+        # 기본은 '보는 중' — 서재에 있는 건 대개 아직 보고 있는 작품이고, 그래야 소식의 '이어 보기'에 바로 잡힌다
+        status = form.get("status") if form.get("status") in db.STATUSES else "watching"
         saved = 0
         for value in form.getlist("no"):
             no = int(value)

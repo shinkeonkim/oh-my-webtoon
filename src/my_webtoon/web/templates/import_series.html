@@ -26,7 +26,7 @@
   <section class="panel">
     <h2>받은 작품 {{ received }}개 · 수집된 만화 {{ items | length }}개</h2>
     <p class="panel__desc">체크한 작품을 아래 상태로 저장해요. 이미 상태를 남긴 작품은 건드리지 않아요(별점만 있으면 상태만 더해요).</p>
-    {% call ui.field('저장할 상태') %}{{ ui.chip_radio('status', [('seen', '봤음'), ('watching', '보는 중'), ('wish', '보고 싶음')], 'seen', none_label=none) }}{% endcall %}
+    {% call ui.field('저장할 상태') %}{{ ui.chip_radio('status', [('watching', '보는 중'), ('seen', '봤음'), ('wish', '보고 싶음')], 'watching', none_label=none) }}{% endcall %}
     {% if items %}
     <ul class="list import-list mt-3">
       {%- for comic, review in items %}
