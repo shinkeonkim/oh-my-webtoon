@@ -9,8 +9,8 @@
 - 내부 확인: https://my-webtoon.homelab.shinkeonkim.com (tailnet)
 
 <p align="center">
-  <a href="docs/media/intro.mp4"><img src="docs/media/intro.gif" width="300" alt="oh-my-webtoon 소개: 별점 남기기 → 취향과 무료 회차로 추천 → 작품별 추천도 → 무료가 늘면 소식"></a>
-  <br><sub>32초 소개 (누르면 원본 영상 <code>docs/media/intro.mp4</code>). 만드는 스크립트는 별도 저장소 <code>oh-my-webtoon-sns-posts</code></sub>
+  <a href="docs/media/intro.mp4"><img src="docs/media/intro.gif" width="360" alt="oh-my-webtoon 소개: 별점 남기기 → 취향과 무료 회차로 추천 → 작품별 추천도 → 무료가 늘면 소식"></a>
+  <br><sub>32초 소개 — 누르면 원본 영상(1080×1920, 60fps). 만드는 스크립트는 별도 저장소 <code>oh-my-webtoon-sns-posts</code></sub>
 </p>
 
 ## 어떻게 동작하나 (한 장 요약)
