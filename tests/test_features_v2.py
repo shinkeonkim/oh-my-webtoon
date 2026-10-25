@@ -1,5 +1,7 @@
 """빠른 평가 · 관심 없음 · 소식(변경 기록) · 이어 보기 · 취향 · 필터 · 운영 · 수집 우선순위 · 스냅숏."""
 
+from datetime import UTC, datetime, timedelta
+
 from my_webtoon import backup, db
 from my_webtoon.recommender import Engine, ScoringOptions
 
@@ -151,8 +153,8 @@ def test_comics_filters(client, library):
     assert titles(free="100") == {"화산 귀환 무사"}  # 전부 무료 150화
     assert titles(free="30") == {"화산 귀환 무사", "검황 회귀전"}
     assert titles(free="all") == {"화산 귀환 무사"}
-    client.post("/reviews/4", data={"score": "9"}, headers=HX)
-    assert "화산 귀환 무사" not in titles(unrated="1")
+    client.post("/reviews/4", data={"status": "seen"}, headers=HX)
+    assert "화산 귀환 무사" not in titles(unrated="1")  # 옛 주소: 상태 없는 것만 (mine=none)
     with db.session(library) as conn:
         db.upsert_comic(conn, comic_data(1, "천마 회귀록", status="완결"))
     assert titles(status="완결") == {"천마 회귀록"}
@@ -333,15 +335,19 @@ def test_rate_status_filter_combines_with_search(client, library):
         page = client.get("/rate", params=params).text
         return {t for t in ("천마 회귀록", "검황 회귀전", "화산 귀환 무사") if t in page}
 
-    assert titles(status="watching") == {"천마 회귀록"}
-    assert titles(q="회귀", status="seen") == {"검황 회귀전"}
-    assert titles(q="회귀", status="none") == set()  # 1·2는 상태가 있다
-    assert "천마 회귀록" not in client.get("/rate", params={"status": "none"}).text
-    assert "화산 귀환 무사" in client.get("/rate", params={"status": "none"}).text
+    assert titles(mine="watching") == {"천마 회귀록"}
+    assert titles(q="회귀", mine="seen") == {"검황 회귀전"}
+    assert titles(q="회귀", mine="none") == set()  # 1·2는 상태가 있다
+    assert titles(status="watching") == {"천마 회귀록"}  # 옛 주소 /rate?status=<내 상태>
+    assert "천마 회귀록" not in client.get("/rate", params={"mine": "none"}).text
+    assert "화산 귀환 무사" in client.get("/rate", params={"mine": "none"}).text
+    assert titles(mine="none", genre="무협") == {
+        "화산 귀환 무사"
+    }  # 장르 같은 작품 필터와도 같이 걸린다
 
     page = client.get("/rate", params={"q": "회귀"}).text
-    assert 'href="/rate?q=%ED%9A%8C%EA%B7%80&amp;status=watching"' in page  # 탭이 검색어를 유지
-    assert 'name="status" value' not in page  # 상태 탭을 안 골랐으면 숨은 칸도 없다
+    assert 'href="/rate?q=%ED%9A%8C%EA%B7%80&amp;mine=watching"' in page  # 탭이 검색어를 유지
+    assert 'name="mine" value' not in page  # 상태 탭을 안 골랐으면 숨은 칸도 없다
     with db.session(library) as conn:
         counts = db.review_status_counts(conn, ME, "회귀")
     assert counts["watching"] == 1 and counts["seen"] == 1
@@ -351,13 +357,11 @@ def test_rate_infinite_scroll(client, monkeypatch):
     import importlib
 
     monkeypatch.setattr(importlib.import_module("my_webtoon.web.app"), "PER_PAGE", 2)
-    first = client.get("/rate", params={"status": "none"}).text
-    assert 'hx-get="/rate?status=none&amp;page=1"' in first
-    more = client.get("/rate", params={"status": "none", "page": 1}, headers=HX).text
+    first = client.get("/rate", params={"mine": "none"}).text
+    assert 'hx-get="/rate?mine=none&amp;page=1"' in first
+    more = client.get("/rate", params={"mine": "none", "page": 1}, headers=HX).text
     assert "<html" not in more and "card" in more
-
-    popular = client.get("/rate").text  # 조건 없는 '많이 본 작품'도 이어서 불러온다
-    assert 'hx-get="/rate?page=1"' in popular
+    assert 'hx-get="/rate?page=1"' in client.get("/rate").text
 
 
 def test_series_import_defaults_to_watching(client, library):
@@ -415,3 +419,17 @@ def test_metrics_server_listens_on_its_own_port(library):
     with TestClient(create_app(settings)):
         body = urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=5).read()
         assert b"mywebtoon_comics" in body
+
+
+def test_quick_skip_expires(client, library):
+    first = _quick_product(client.get("/quick").text)
+    client.post(f"/quick/{first}", data={"action": "skip", "done": "0"}, headers=HX)
+    assert "30일 동안만" in client.get("/quick").text
+    with db.session(library) as conn:
+        assert first in db.quick_skips(conn, ME)
+        old = (datetime.now(UTC) - timedelta(days=db.QUICK_SKIP_DAYS + 1)).isoformat()
+        conn.execute("UPDATE quick_skips SET skipped_at = ?", (old,))
+        conn.commit()
+        assert first not in db.quick_skips(conn, ME)  # 기간이 지나면 다시 물어본다
+        db.set_quick_skip(conn, ME, first, True)  # 다시 넘기면 그때부터 다시 센다
+        assert first in db.quick_skips(conn, ME)

@@ -18,58 +18,89 @@
 <body>
   {%- import "_ui.html" as ui %}
   {%- set path = request.url.path %}
-  {#- 메뉴는 여기서 한 번만 정의하고, 데스크톱(위 가로 메뉴)과 모바일(아래 탭바) 두 곳에 그린다.
-      (주소, 라벨, 아이콘, 선택됨, 모바일 탭바에도 보일지) -#}
+  {#- 메뉴는 여기서 한 번만 정의하고 세 곳에 그린다: 데스크톱 위 메뉴(마우스를 올리면 하위 메뉴),
+      모바일 아래 탭바, 그리고 각 화면 위의 하위 메뉴 탭(모바일에서도 하위 화면으로 갈 수 있게).
+      섹션: (주소, 라벨, 아이콘, 선택됨, [(하위 주소, 하위 라벨, 선택됨), ...]) -#}
   {%- set my_page = '/users/' ~ user.username if user else '/users' %}
   {%- if authed %}
-    {%- set menu = [
-      ('/', '추천', 'sparkle', path == '/', true),
-      ('/rate', '평가하기', 'star-outline', path in ('/rate', '/quick'), true),
-      ('/news', '소식', 'bell', path == '/news', false),
-      ('/comics', '작품', 'grid', path == '/comics' or path.startswith('/comic/'), true),
-      (my_page, '평가 기록', 'list', path.startswith('/users'), true),
-      ('/crawl', '수집', 'more', path == '/crawl', false),
-      ('/settings', '설정', 'more', path == '/settings', false),
+    {%- set rate_sub = [
+      ('/rate', '찾아서 평가', path in ('/rate', '/comics')),
+      ('/quick', '빠른 평가', path == '/quick'),
+    ] + ([] if user.is_demo else [('/import/series', '시리즈에서 가져오기', path == '/import/series')]) + [
+      (my_page, '내 평가 기록', path in (my_page, my_page ~ '/taste')),
+    ] %}
+    {%- set sections = [
+      ('/', '추천', 'sparkle', path == '/', []),
+      ('/rate', '평가', 'star-outline', path in ('/rate', '/comics', '/quick', '/import/series') or path.startswith('/comic/') or path.startswith('/users') or path.startswith('/reviews/'), rate_sub),
+      ('/news', '소식', 'bell', path in ('/news', '/crawl'), [('/news', '소식', path == '/news'), ('/crawl', '수집 현황', path == '/crawl')]),
     ] %}
   {%- else %}
-    {%- set menu = [
-      ('/comics', '작품', 'grid', path == '/comics' or path.startswith('/comic/'), true),
-      (my_page, '평가 기록', 'list', path.startswith('/users'), true),
-      ('/login', '로그인', 'user', path == '/login', true),
+    {%- set sections = [
+      ('/comics', '작품', 'grid', path == '/comics' or path.startswith('/comic/'), []),
+      ('/users', '평가 기록', 'list', path.startswith('/users'), []),
+      ('/login', '로그인', 'user', path == '/login', []),
     ] %}
   {%- endif %}
   <header class="topbar">
     <div class="topbar__inner">
       <a class="brand" href="{{ '/' if authed else '/comics' }}"><img src="/static/favicon.svg?v={{ static_version }}" alt="" width="24" height="24">my-webtoon</a>
       <nav class="nav" aria-label="메뉴">
-        {%- for href, label, _icon, on, _ in menu %}
-        <a href="{{ href }}" class="{{ 'is-on' if on }}"{{ ' aria-current="page"' if on }}>{{ label }}</a>
+        {%- for href, label, _icon, on, sub in sections %}
+        <div class="nav__item{{ ' has-sub' if sub }}">
+          <a href="{{ href }}" class="{{ 'is-on' if on }}"{{ ' aria-current="page"' if on }}>{{ label }}{% if sub %}{{ ui.icon('chevron', 12) }}{% endif %}</a>
+          {%- if sub %}
+          <div class="nav__sub">
+            {%- for sub_href, sub_label, sub_on in sub %}<a href="{{ sub_href }}" class="{{ 'is-on' if sub_on }}">{{ sub_label }}</a>{% endfor %}
+          </div>
+          {%- endif %}
+        </div>
         {%- endfor %}
       </nav>
       <div class="topbar__user">
-        {%- if authed and can_logout %}
-        <span class="topbar__name">{{ user.username }}</span>
-        <form method="post" action="/logout" class="inline"><button class="btn btn--ghost btn--sm">로그아웃</button></form>
+        {%- if authed %}
+        <details class="usermenu">
+          <summary class="usermenu__button" aria-label="내 메뉴">{{ ui.icon('user', 16) }}<span class="usermenu__name">{{ user.username }}</span>{{ ui.icon('chevron', 12) }}</summary>
+          <div class="usermenu__panel">
+            <a href="{{ my_page }}">내 평가 기록</a>
+            <a href="/settings" class="{{ 'is-on' if path == '/settings' }}">설정</a>
+            {%- if can_logout %}
+            <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+            {%- endif %}
+          </div>
+        </details>
         {%- endif %}
       </div>
     </div>
   </header>
   <nav class="tabbar" aria-label="메뉴">
-    {%- for href, label, icon_name, on, in_tabbar in menu if in_tabbar %}
+    {%- for href, label, icon_name, on, _ in sections %}
     <a href="{{ href }}" class="tabbar__item{{ ' is-on' if on }}"{{ ' aria-current="page"' if on }}>{{ ui.icon(icon_name, 22) }}<span>{{ label }}</span></a>
     {%- endfor %}
     {%- if authed %}
-    <a href="/settings" class="tabbar__item{{ ' is-on' if path in ('/settings', '/crawl', '/news') }}">{{ ui.icon('more', 22) }}<span>더보기</span></a>
+    <a href="/settings" class="tabbar__item{{ ' is-on' if path == '/settings' }}">{{ ui.icon('user', 22) }}<span>내 정보</span></a>
     {%- endif %}
   </nav>
   <main>
     {%- if user and user.is_demo %}
     <p class="alert alert--info">시연용 계정이에요. 자유롭게 평가해 보세요 — 평가는 매일 밤 처음 상태로 돌아가고, 비밀번호 변경·가져오기는 막혀 있어요.</p>
     {%- endif %}
+    {#- 지금 섹션의 하위 메뉴. 하위 화면 중 하나에 있을 때만 (작품 상세 같은 곳에선 숨긴다) -#}
+    {%- for _h, _l, _i, on, sub in sections if on and sub and (sub | selectattr(2) | list) %}
+    <nav class="subnav">{{ ui.tabs(sub | map('subnav_item') | list, '하위 메뉴') }}</nav>
+    {%- endfor %}
     {% block content %}{% endblock %}
   </main>
   <footer>
     데이터 출처 <a href="https://series.naver.com/comic/home.series" target="_blank" rel="noopener">네이버 시리즈</a> · 개인 학습용 추천기 · <a href="/ui">UI 컴포넌트</a>
   </footer>
+  <script>
+    // 내 메뉴: 바깥을 누르거나 Esc 를 누르면 닫는다 (<details> 는 기본으로는 다시 눌러야만 닫힌다)
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('details.usermenu[open]').forEach((d) => { if (!d.contains(e.target)) d.open = false; });
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') document.querySelectorAll('details.usermenu[open]').forEach((d) => { d.open = false; });
+    });
+  </script>
 </body>
 </html>

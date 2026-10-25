@@ -287,37 +287,14 @@ FREE_FILTERS = {  # /comics?free=...  (권은 1권 = 8화로 환산 — scoring.
 STATUS_FILTERS = ("연재중", "완결")
 
 
-def list_comics(
-    conn: sqlite3.Connection,
-    *,
-    query: str = "",
-    genre: str = "",
-    sort: str = "popular",
-    free: str = "",
-    status: str = "",
-    hide_reviewed_by: int | None = None,
-    review_of: int | None = None,
-    review_status: str = "",
-    limit: int = 40,
-    offset: int = 0,
-) -> tuple[list[Comic], int]:
-    """수집 목록 화면용. (현재 페이지 작품들, 조건에 맞는 전체 개수).
-
-    review_of + review_status: 그 사용자가 남긴 상태로 거른다 (/rate). 'none' 은 상태가 없는 작품
-    — 평가가 아예 없거나 별점만 있는 작품.
-    """
+def _comic_filters(
+    query: str = "", genre: str = "", free: str = "", status: str = ""
+) -> tuple[list, list]:
+    """목록 화면의 공통 조건 (WHERE 조각들, 파라미터). list_comics 와 review_status_counts 가 같이 쓴다."""
     where, params = [], []
     if query.strip():
         where.append("(c.title LIKE ? OR c.authors LIKE ?)")
         params += [f"%{query.strip()}%"] * 2
-    if review_of is not None and (review_status == "none" or review_status in STATUSES):
-        mine = "SELECT product_no FROM reviews WHERE user_id = ? AND status "
-        if review_status == "none":
-            where.append(f"c.product_no NOT IN ({mine}IS NOT NULL)")
-            params.append(review_of)
-        else:
-            where.append(f"c.product_no IN ({mine}= ?)")
-            params += [review_of, review_status]
     if genre:
         where.append("c.genre = ?")
         params.append(genre)
@@ -332,9 +309,40 @@ def list_comics(
     if status in STATUS_FILTERS:
         where.append("c.status = ?")
         params.append(status)
+    return where, params
+
+
+def list_comics(
+    conn: sqlite3.Connection,
+    *,
+    query: str = "",
+    genre: str = "",
+    sort: str = "popular",
+    free: str = "",
+    status: str = "",
+    hide_reviewed_by: int | None = None,
+    review_of: int | None = None,
+    review_status: str = "",
+    limit: int = 40,
+    offset: int = 0,
+) -> tuple[list[Comic], int]:
+    """작품 목록 화면(/rate, /comics)용. (현재 페이지 작품들, 조건에 맞는 전체 개수).
+
+    status 는 연재 상태(연재중/완결), review_status 는 review_of 사용자가 남긴 상태다.
+    review_status 'none' 은 상태가 없는 작품 — 평가가 아예 없거나 별점만 있는 작품.
+    """
+    where, params = _comic_filters(query, genre, free, status)
     if hide_reviewed_by is not None:
         where.append("c.product_no NOT IN (SELECT product_no FROM reviews WHERE user_id = ?)")
         params.append(hide_reviewed_by)
+    if review_of is not None and (review_status == "none" or review_status in STATUSES):
+        mine = "SELECT product_no FROM reviews WHERE user_id = ? AND status "
+        if review_status == "none":
+            where.append(f"c.product_no NOT IN ({mine}IS NOT NULL)")
+            params.append(review_of)
+        else:
+            where.append(f"c.product_no IN ({mine}= ?)")
+            params += [review_of, review_status]
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     order = COMIC_SORTS.get(sort, COMIC_SORTS["popular"])[1]
     order_params: list = []
@@ -348,18 +356,18 @@ def list_comics(
     return [Comic.from_row(r) for r in rows], total
 
 
-def review_status_counts(conn: sqlite3.Connection, user_id: int, query: str = "") -> dict[str, int]:
-    """/rate 상태 탭의 개수. 검색어가 있으면 그 결과 안에서 센다. 'none' = 상태 없는 작품."""
-    where, params = "", [user_id]
-    if query.strip():
-        where = " WHERE c.title LIKE ? OR c.authors LIKE ?"
-        params += [f"%{query.strip()}%"] * 2
+def review_status_counts(
+    conn: sqlite3.Connection, user_id: int, query: str = "", **filters: str
+) -> dict[str, int]:
+    """목록 화면의 '내 상태' 탭 개수. 검색어·장르·무료·연재 조건이 있으면 그 안에서 센다. 'none' = 상태 없는 작품."""
+    where, params = _comic_filters(query, **filters)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
     rows = conn.execute(
         "SELECT r.status, COUNT(*) FROM comics c"
         " LEFT JOIN reviews r ON r.product_no = c.product_no AND r.user_id = ?"
-        + where
+        + clause
         + " GROUP BY r.status",
-        params,
+        [user_id, *params],
     ).fetchall()
     counts = {k: 0 for k in STATUSES}
     counts["none"] = 0
@@ -734,16 +742,25 @@ def reviews_with_comics(conn: sqlite3.Connection, user_id: int) -> list[tuple[Re
     ]
 
 
-def quick_skips(conn: sqlite3.Connection, user_id: int) -> set[int]:
-    """빠른 평가에서 '안 봤음'으로 넘긴 작품들."""
-    rows = conn.execute("SELECT product_no FROM quick_skips WHERE user_id = ?", (user_id,))
+QUICK_SKIP_DAYS = (
+    30  # '안 봤음'은 이 기간만 다시 묻지 않는다 — 그 사이 보게 될 수도 있으니 영원히 가리지 않는다
+)
+
+
+def quick_skips(conn: sqlite3.Connection, user_id: int, days: int = QUICK_SKIP_DAYS) -> set[int]:
+    """빠른 평가에서 최근 days 일 안에 '안 봤음'으로 넘긴 작품들. 기간이 지나면 다시 물어본다."""
+    since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT product_no FROM quick_skips WHERE user_id = ? AND skipped_at >= ?", (user_id, since)
+    )
     return {r[0] for r in rows}
 
 
 def set_quick_skip(conn: sqlite3.Connection, user_id: int, product_no: int, on: bool) -> None:
     if on:
         conn.execute(
-            "INSERT OR IGNORE INTO quick_skips (user_id, product_no, skipped_at) VALUES (?, ?, ?)",
+            # 기간이 지나 다시 물어본 작품을 또 넘기면 그때부터 다시 센다
+            "INSERT OR REPLACE INTO quick_skips (user_id, product_no, skipped_at) VALUES (?, ?, ?)",
             (user_id, product_no, now_iso()),
         )
     else:

@@ -165,6 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         star_option=lambda v: (v, f"★{format_stars(v)}"),  # 셀렉트용 (값, 라벨)
         pair=lambda v: (v, v),
         sort_option=lambda item: (item[0], item[1][0]),
+        subnav_item=lambda item: (item[0], item[1], None, item[2]),  # base.html 하위 메뉴 → ui.tabs
     )
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 
@@ -297,7 +298,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # 카드 하나가 폼이다. 별점·상태·본 화수를 고르는 동안은 아무것도 저장하지 않고, 버튼을 눌러야 저장하고 넘어간다.
     #   save       고른 값 저장 (별점만 골랐으면 상태는 '봤음')
-    #   skip       안 봤음 — 평가 아님, 다시 묻지만 않는다 (quick_skips)
+    #   skip       안 봤음 — 평가 아님, db.QUICK_SKIP_DAYS 동안만 다시 묻지 않는다 (quick_skips)
     #   dismissed  관심 없음
 
     def quick_card(request: Request, conn, done: int = 0, last=None, comic=None, error=""):
@@ -313,6 +314,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             last=last,
             error=error,
             review_count=len(db.all_reviews(conn, user.id)),
+            skip_days=db.QUICK_SKIP_DAYS,
         )
 
     @app.get("/quick", response_class=HTMLResponse)
@@ -409,78 +411,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # -- 평가하기 (검색 + 가져오기) -------------------------------------------------
 
-    @app.get("/rate", response_class=HTMLResponse)
-    def rate_page(
-        request: Request,
-        q: str = "",
-        status: str = "",
-        page: int = 0,
-        conn=Depends(get_conn),
-        error: str = "",
-    ):
-        user = me(request)
-        if status not in RATE_STATUS_FILTERS:
-            status = ""
-        filtered = bool(q.strip() or status)
-        if filtered:
-            # 검색과 상태 필터는 같이 걸린다: "회귀" + "보는 중" = 내가 보는 중인 작품 중 제목에 회귀
-            comics, total = db.list_comics(
-                conn,
-                query=q,
-                sort="search" if q.strip() else "popular",
-                review_of=user.id,
-                review_status=status,
-                limit=PER_PAGE,
-                offset=page * PER_PAGE,
-            )
-            has_next = (page + 1) * PER_PAGE < total
-        else:
-            # 아무 조건이 없으면 '많이 본 작품부터 훑어보기' (평가한 작품은 빠진다)
-            comics = engine.popular(
-                conn, options_from_query(request), user.id, limit=PER_PAGE, offset=page * PER_PAGE
-            )
-            total, has_next = None, len(comics) == PER_PAGE
-        ctx = dict(
-            comics=comics,
-            page=page,
-            has_next=has_next,
-            reviews=db.all_reviews(conn, user.id),
-            query_string=_query_without(request, "page"),
-            base_path="/rate",
-        )
-        if request.headers.get("HX-Request") and page > 0:
-            return render(request, "_comics_page.html", **ctx)
-        counts = db.review_status_counts(conn, user.id, q)
-        status_tabs = [
-            (
-                "/rate?"
-                + urlencode({**({"q": q} if q.strip() else {}), **({"status": k} if k else {})}),
-                label,
-                counts.get(k) if k else None,
-                status == k,
-            )
-            for k, label in RATE_STATUS_FILTERS.items()
-        ]
-        return render(
-            request,
-            "rate.html",
-            q=q,
-            status=status,
-            status_label=RATE_STATUS_FILTERS[status],
-            filtered=filtered,
-            total=total,
-            status_tabs=status_tabs,
-            # 서버가 네이버 검색을 대신할 수는 없다(robots.txt 가 /search 를 막음).
-            # 대신 내 브라우저에서 검색 결과를 열어 링크를 복사해 오게 한다.
-            naver_search_url=(
-                "https://series.naver.com/search/search.series?t=all&fs=comic&q=" + quote(q)
-                if q.strip()
-                else None
-            ),
-            error=error,
-            **ctx,
-        )
-
     @app.post("/import")
     def import_comic(request: Request, url: str = Form(...), conn=Depends(get_conn)):
         if blocked := forbid_demo(request, "/rate", "데모 계정에서는 링크로 가져올 수 없어요"):
@@ -554,55 +484,100 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # -- 공개 화면: 수집 목록 / 상세 / 사용자별 평가 기록 ---------------------------------
 
-    @app.get("/comics", response_class=HTMLResponse)
-    def comics_page(
-        request: Request,
-        conn=Depends(get_conn),
-        q: str = "",
-        genre: str = "",
-        sort: str = "popular",
-        free: str = "",
-        status: str = "",
-        unrated: str = "",
-        page: int = 0,
-    ):
+    # /rate (로그인) 와 /comics (공개, 읽기 전용) 는 같은 화면이다: 작품을 찾아 보고 바로 평가한다.
+    # 조건이 전부 같이 걸린다 — 검색어 + 장르 + 무료 + 연재 상태 + 내가 남긴 상태(mine) + 정렬.
+    # 예전 주소도 받는다: /comics?unrated=1 → mine=none, /rate?status=watching → mine=watching.
+
+    def browse(request: Request, conn, base_path: str):
+        p = request.query_params
         uid = my_id(request)
+        q, genre, free, status = (
+            p.get("q", ""),
+            p.get("genre", ""),
+            p.get("free", ""),
+            p.get("status", ""),
+        )
+        mine = p.get("mine", "")
+        if status and status in RATE_STATUS_FILTERS and status not in db.STATUS_FILTERS:
+            status, mine = "", status  # 옛 /rate?status=<내 상태>
+        if p.get("unrated"):
+            mine = "none"
+        if uid is None or mine not in RATE_STATUS_FILTERS:
+            mine = ""
+        sort = p.get("sort") or ("search" if q.strip() else "popular")
+        page = int(p.get("page") or 0)
+        filters = dict(genre=genre, free=free, status=status)
         comics, total = db.list_comics(
             conn,
             query=q,
-            genre=genre,
             sort=sort,
-            free=free,
-            status=status,
-            hide_reviewed_by=uid if unrated and uid else None,
+            review_of=uid,
+            review_status=mine,
             limit=PER_PAGE,
             offset=page * PER_PAGE,
+            **filters,
         )
         ctx = dict(
             comics=comics,
             page=page,
             has_next=(page + 1) * PER_PAGE < total,
-            reviews=db.all_reviews(conn, my_id(request)),
+            reviews=db.all_reviews(conn, uid),
             query_string=_query_without(request, "page"),
+            base_path=base_path,
         )
         if request.headers.get("HX-Request") and page > 0:
             return render(request, "_comics_page.html", **ctx)
+        mine_tabs = []
+        if uid is not None:
+            counts = db.review_status_counts(conn, uid, q, **filters)
+            keep = {k: v for k, v in _query_dict(request, "page", "mine", "unrated").items()}
+            mine_tabs = [
+                (
+                    base_path + "?" + urlencode({**keep, **({"mine": k} if k else {})}),
+                    label,
+                    counts.get(k) if k else None,
+                    mine == k,
+                )
+                for k, label in RATE_STATUS_FILTERS.items()
+            ]
         return render(
             request,
-            "comics.html",
+            "browse.html",
             total=total,
             q=q,
             genre=genre,
-            sort=sort,
+            sort=p.get("sort", ""),
             free=free,
             status=status,
-            unrated=unrated,
+            mine=mine,
+            mine_tabs=mine_tabs,
             genres=db.genres(conn),
             sorts=db.COMIC_SORTS,
             free_filters=db.FREE_FILTERS,
             status_filters=db.STATUS_FILTERS,
+            # 서버가 네이버 검색을 대신할 수는 없다(robots.txt 가 /search 를 막음).
+            # 대신 내 브라우저에서 검색 결과를 열어 링크를 복사해 오게 한다.
+            naver_search_url=(
+                "https://series.naver.com/search/search.series?t=all&fs=comic&q=" + quote(q)
+                if q.strip()
+                else None
+            ),
+            error=p.get("error", ""),
             **ctx,
         )
+
+    @app.get("/rate", response_class=HTMLResponse)
+    def rate_page(request: Request, conn=Depends(get_conn)):
+        return browse(request, conn, "/rate")
+
+    @app.get("/comics", response_class=HTMLResponse)
+    def comics_page(request: Request, conn=Depends(get_conn)):
+        if request.state.user is not None and not request.headers.get("HX-Request"):
+            # 로그인했으면 평가할 수 있는 /rate 로 (같은 화면, 조건 그대로)
+            return RedirectResponse(
+                "/rate" + (f"?{request.url.query}" if request.url.query else ""), 303
+            )
+        return browse(request, conn, "/comics")
 
     @app.get("/comic/{product_no}", response_class=HTMLResponse)
     def comic_detail(request: Request, product_no: int, conn=Depends(get_conn)):

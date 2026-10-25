@@ -274,17 +274,44 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
 .topbar__inner { max-width: 1120px; margin: 0 auto; padding: 0 var(--space-4); height: 56px; display: flex; align-items: center; gap: var(--space-4); }
 .brand { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 800; font-size: var(--text-lg); text-decoration: none; color: var(--accent); letter-spacing: -0.02em; flex: none; }
 .brand img { border-radius: 6px; }
-.nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1; }
-.nav::-webkit-scrollbar { display: none; }
-.nav a { flex: none; text-decoration: none; padding: 6px 10px; border-radius: var(--radius-sm); color: var(--text-2); font-size: var(--text-sm); font-weight: 500; }
-.nav a:hover { color: var(--text); background: var(--surface-2); }
-.nav a.is-on { color: var(--text); font-weight: 700; }
+/* 위 메뉴: 섹션 셋. 하위 메뉴가 있는 섹션은 마우스를 올리거나 키보드로 들어가면 펼친다 (모바일은 화면 위 .subnav) */
+.nav { display: flex; gap: 2px; flex: 1; }
+.nav__item { position: relative; }
+.nav__item > a { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; padding: 6px 10px; border-radius: var(--radius-sm); color: var(--text-2); font-size: var(--text-sm); font-weight: 500; }
+.nav__item > a .icon { opacity: 0.5; }
+.nav__item > a:hover { color: var(--text); background: var(--surface-2); }
+.nav__item > a.is-on { color: var(--text); font-weight: 700; }
+.nav__sub {
+  display: none; position: absolute; top: 100%; left: 0; min-width: 180px; padding: var(--space-1);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgb(0 0 0 / 0.08);
+}
+.nav__item.has-sub:hover .nav__sub, .nav__item.has-sub:focus-within .nav__sub { display: grid; }
+.nav__sub a, .usermenu__panel a, .usermenu__panel button {
+  display: block; width: 100%; text-align: left; padding: 8px 12px; border-radius: var(--radius-sm); border: 0; background: none; cursor: pointer;
+  text-decoration: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); white-space: nowrap;
+}
+.nav__sub a:hover, .usermenu__panel a:hover, .usermenu__panel button:hover { background: var(--surface-2); color: var(--text); }
+.nav__sub a.is-on, .usermenu__panel a.is-on { color: var(--text); font-weight: 700; }
 .topbar__user { flex: none; display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-3); }
+.usermenu { position: relative; }
+.usermenu__button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--radius-pill); cursor: pointer;
+  list-style: none; color: var(--text-2); border: 1px solid var(--line); background: var(--surface);
+}
+.usermenu__button::-webkit-details-marker { display: none; }
+.usermenu__button:hover, .usermenu[open] .usermenu__button { color: var(--text); background: var(--surface-2); }
+.usermenu__panel {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 160px; padding: var(--space-1); z-index: 30;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgb(0 0 0 / 0.08);
+}
+.usermenu__panel form { margin: 0; }
+.usermenu__panel button { color: var(--warn); }
+.subnav { margin-bottom: var(--space-4); }
 
 /* 모바일 하단 탭바 — 좁은 화면에선 위 가로 메뉴 대신 엄지가 닿는 아래쪽에 */
 .tabbar { display: none; }
 @media (max-width: 720px) {
-  .nav, .topbar__name { display: none; }
+  .nav, .usermenu__name { display: none; }
   .topbar__inner { height: 52px; justify-content: space-between; }
   .tabbar {
     display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;

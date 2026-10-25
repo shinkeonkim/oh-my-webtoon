@@ -281,8 +281,14 @@ def test_mobile_tabbar_and_favicon(client):
     ):
         assert client.get(path).status_code == 200, path
     tabbar = page.split('class="tabbar"', 1)[1].split("</nav>", 1)[0]
-    assert all(label in tabbar for label in ("추천", "평가하기", "작품", "평가 기록", "더보기"))
-    assert "수집·운영" in client.get("/settings").text  # 탭바에 없는 메뉴는 '더보기'(설정)에서
+    assert all(label in tabbar for label in ("추천", "평가", "소식", "내 정보"))
+    # 하위 메뉴는 화면 위 탭으로 (모바일에서도 갈 수 있게)
+    assert 'href="/crawl"' in client.get("/news").text.split('class="subnav"', 1)[1]
+    rate = client.get("/rate").text
+    assert all(
+        h in rate.split('class="subnav"', 1)[1][:2000] for h in ('href="/quick"', 'href="/users/')
+    )
+    assert 'class="subnav"' not in client.get("/comic/1").text  # 하위 화면이 아니면 숨긴다
 
 
 def test_kst_filter_and_mobile_link():

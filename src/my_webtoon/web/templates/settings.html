@@ -6,10 +6,9 @@
 {% if msg %}<p class="alert alert--ok">{{ msg }}</p>{% endif %}
 
 {#- 모바일 탭바의 '더보기'가 이 화면이라, 탭바에 없는 메뉴를 여기서 이어 준다 -#}
-<nav class="panel shortcuts" aria-label="더보기">
-  {{ ui.button('소식', 'secondary', href='/news', icon_name='bell') }}
+<nav class="panel shortcuts" aria-label="내 정보">
+  {{ ui.button('내 평가 기록', 'secondary', href='/users/' ~ user.username, icon_name='list') }}
   {{ ui.button('내 취향', 'secondary', href='/users/' ~ user.username ~ '/taste', icon_name='chart') }}
-  {{ ui.button('수집·운영', 'secondary', href='/crawl') }}
   {{ ui.button('UI 컴포넌트', 'ghost', href='/ui') }}
   {%- if can_logout %}<form method="post" action="/logout" class="inline">{{ ui.button('로그아웃', 'danger') }}</form>{% endif %}
 </nav>

@@ -35,7 +35,7 @@
         {{ ui.button('안 봤음 · 넘기기', 'secondary', attrs='name="action" value="skip"') }}
         {{ ui.button('관심 없음', 'ghost', attrs='name="action" value="dismissed"') }}
       </div>
-      <p class="field__hint">'안 봤음'은 취향에 반영하지 않고 다시 묻지만 않아요.</p>
+      <p class="field__hint">'안 봤음'은 취향에 반영하지 않고, {{ skip_days }}일 동안만 다시 묻지 않아요. 그 사이 봤다면 평가에서 찾아 남기면 돼요.</p>
     </div>
   </form>
   {% else %}
