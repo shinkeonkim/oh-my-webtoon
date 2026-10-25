@@ -5,7 +5,13 @@
 총 회차가 긴 작품을 위로, 무료 3화 이하 '유료 위주' 작품은 맨 아래로** 보낸다.
 
 - 공개 주소: https://my-webtoon.shinkeonkim.com (비밀번호 로그인)
+- **바로 둘러보기: https://my-webtoon.shinkeonkim.com/demo** — 가입 없이 데모 계정으로 들어간다(평가는 매일 밤 원래대로)
 - 내부 확인: https://my-webtoon.homelab.shinkeonkim.com (tailnet)
+
+<p align="center">
+  <a href="docs/media/intro.mp4"><img src="docs/media/intro.gif" width="300" alt="oh-my-webtoon 소개: 별점 남기기 → 취향과 무료 회차로 추천 → 작품별 추천도 → 무료가 늘면 소식"></a>
+  <br><sub>32초 소개 (누르면 원본 영상 <code>docs/media/intro.mp4</code>). 만드는 스크립트는 별도 저장소 <code>oh-my-webtoon-sns-posts</code></sub>
+</p>
 
 ## 어떻게 동작하나 (한 장 요약)
 
