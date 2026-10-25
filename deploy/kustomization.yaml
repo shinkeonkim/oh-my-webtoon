@@ -12,9 +12,9 @@ resources:
 - monitoring.yaml
 # Grafana 대시보드 (monitoring.yaml 주석 참고). 이름이 바뀌지 않게 해시 접미사를 끈다.
 configMapGenerator:
-- name: my-webtoon-grafana-dashboard
-  files:
+- files:
   - my-webtoon.json=grafana-dashboard.json
+  name: my-webtoon-grafana-dashboard
   options:
     disableNameSuffixHash: true
     labels:
@@ -25,4 +25,4 @@ labels:
 images:
 - name: ghcr.io/shinkeonkim/oh-my-webtoon
   newName: ghcr.io/shinkeonkim/oh-my-webtoon
-  newTag: sha-aaedd72
+  newTag: sha-2fb7b5d
