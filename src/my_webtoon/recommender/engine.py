@@ -7,15 +7,22 @@
 
 작품 벡터는 만드는 데 1초 남짓 걸리므로 메모리에 캐시하고,
 DB 의 작품 데이터가 바뀌었을 때(크롤링 후)만 다시 만든다.
+
+다시 만드는 건 요청을 세우지 않고 뒤에서 한다 — 그동안은 이전 벡터로 답한다.
+크롤러는 작품을 하나 저장할 때마다 crawled_at 을 바꾸므로, 요청마다 다시 만들면
+수집 중(3시간마다 10분쯤) 모든 화면이 1초 이상(운영에선 4초까지) 걸렸다.
+그래서 수집 중에는 REFRESH_INTERVAL 에 한 번만 다시 만들고, 수집이 끝나면(invalidate) 바로 만든다.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 import secrets
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -31,6 +38,18 @@ from .works import work_keys
 
 SNAPSHOT_TTL = timedelta(minutes=30)
 DIVERSITY_WINDOW = 150  # 다양화(MMR)는 앞쪽 이만큼만 다시 줄 세운다 — 뒤쪽은 어차피 잘 안 본다
+REFRESH_INTERVAL = 600  # 초. invalidate 없이 작품 데이터만 바뀌었을 때 다시 만드는 최소 간격
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class _Scores:
+    """작품별 보정값을 옵션 하나에 대해 한 번에 계산해 둔 배열 (행 = features 행 순서)."""
+
+    boost: np.ndarray
+    stingy: np.ndarray  # bool
+    adult: np.ndarray  # bool
 
 
 @dataclass
@@ -51,18 +70,28 @@ class Engine:
         text_weight: float = DEFAULT_TEXT_WEIGHT,
         meta_weight: float = DEFAULT_META_WEIGHT,
         profile_opts: ProfileOptions | None = None,
+        refresh_interval: float | None = None,
     ) -> None:
+        """refresh_interval: None 이면 작품 데이터가 바뀐 걸 본 요청이 바로(기다려서) 다시 만든다 — 테스트·CLI.
+        숫자면 뒤에서 다시 만들고 그동안 이전 벡터로 답한다 — 크롤러가 같은 프로세스에서 도는 웹 서버."""
         self.text_weight, self.meta_weight = text_weight, meta_weight
         self.profile_opts = profile_opts or ProfileOptions()
+        self.refresh_interval = refresh_interval
         self._lock = threading.Lock()
         self._signature: tuple | None = None
         self._features: ItemFeatures | None = None
         self._comics: dict[int, Comic] = {}
         self._work: dict[int, str] = {}  # product_no → 작품 키 (판본 묶기)
+        self._scores: dict[ScoringOptions, _Scores] = {}
+        self._built_at = 0.0  # time.monotonic()
+        self._stale = False  # invalidate() 됨 — 간격과 상관없이 다음 요청에서 다시 만든다
+        self._refreshing = False
 
     def invalidate(self) -> None:
         with self._lock:
-            self._signature = None
+            self._stale = True
+            if self.refresh_interval is None:
+                self._signature = None
 
     def warm_up(self, conn: sqlite3.Connection) -> None:
         """작품 벡터를 미리 만들어 둔다 (첫 요청이 느리지 않게). 파드가 뜰 때 /readyz 전에 부른다."""
@@ -71,15 +100,61 @@ class Engine:
     def _load(self, conn: sqlite3.Connection) -> ItemFeatures | None:
         signature = db.comics_signature(conn)
         with self._lock:
-            if signature != self._signature:
-                comics = db.all_comics(conn)
-                self._comics = {c.product_no: c for c in comics}
-                self._work = work_keys(comics)
-                self._features = (
-                    build_features(comics, self.text_weight, self.meta_weight) if comics else None
-                )
-                self._signature = signature
-            return self._features
+            if signature == self._signature:
+                return self._features
+            # 처음 한 번은 기다려서 만든다 — 돌려줄 이전 벡터가 없다
+            if self._signature is None or self.refresh_interval is None:
+                self._build(db.all_comics(conn), signature)
+                return self._features
+            due = self._stale or time.monotonic() - self._built_at >= self.refresh_interval
+            if not due or self._refreshing:
+                return self._features
+            self._refreshing, self._stale = True, False
+        # 작품 읽기는 요청의 연결로(빠르다), 벡터 만들기는 뒤에서. 그동안 이 요청과 다른 요청은 이전 벡터를 쓴다.
+        comics = db.all_comics(conn)
+        threading.Thread(
+            target=self._refresh, args=(comics, signature), name="features", daemon=True
+        ).start()
+        return self._features
+
+    def _refresh(self, comics: list[Comic], signature: tuple) -> None:
+        try:
+            built = self._compute(comics)  # lock 밖에서 — 만드는 동안에도 요청은 이전 벡터로 답한다
+            with self._lock:
+                self._swap(built, signature)
+        except Exception:
+            log.exception("작품 벡터 다시 만들기 실패 — 이전 벡터를 계속 쓴다")
+        finally:
+            self._refreshing = False
+
+    def _build(self, comics: list[Comic], signature: tuple) -> None:
+        self._swap(self._compute(comics), signature)
+
+    def _compute(self, comics: list[Comic]) -> tuple:
+        features = build_features(comics, self.text_weight, self.meta_weight) if comics else None
+        return features, {c.product_no: c for c in comics}, work_keys(comics)
+
+    def _swap(self, built: tuple, signature: tuple) -> None:
+        """(lock 안에서) 작품 벡터와 그에 딸린 캐시를 한 번에 바꾼다."""
+        self._features, self._comics, self._work = built
+        self._scores = {}
+        self._signature = signature
+        self._built_at = time.monotonic()
+
+    def _scores_for(self, features: ItemFeatures, opts: ScoringOptions) -> _Scores:
+        """작품별 보정·유료위주·성인 여부 — 옵션마다 한 번만 계산한다 (요청마다 작품 수천 개를 돌던 부분)."""
+        cache = self._scores
+        scores = cache.get(opts) if features is self._features else None
+        if scores is None:
+            comics = [self._comics[no] for no in features.product_nos]
+            scores = _Scores(
+                boost=np.array([scoring.boost(c, opts) for c in comics]),
+                stingy=np.array([scoring.is_stingy(c, opts) for c in comics], dtype=bool),
+                adult=np.array([scoring.is_adult(c) for c in comics], dtype=bool),
+            )
+            if features is self._features:
+                cache[opts] = scores
+        return scores
 
     def work_of(self, product_no: int) -> str | None:
         return self._work.get(product_no)
@@ -161,9 +236,9 @@ class Engine:
         sims = taste_similarities(features, reviews, self.profile_opts)
         if sims is None:
             return None
-        comics = [self._comics[no] for no in features.product_nos]
-        keep = np.array([opts.include_adult or not scoring.is_adult(c) for c in comics])
-        boosts = np.array([scoring.boost(c, opts) for c in comics])
+        scores = self._scores_for(features, opts)
+        keep = np.ones(len(sims), dtype=bool) if opts.include_adult else ~scores.adult
+        boosts = scores.boost
         finals = sims * boosts
         row = features.index[product_no]
         pool_finals, pool_sims = finals[keep], sims[keep]
@@ -322,28 +397,33 @@ class Engine:
         exclude_works: set[str] = frozenset(),
         only: set[int] | None = None,
     ) -> list[Recommendation]:
+        # 거르기·점수·정렬은 배열로 한 번에 — 작품 수천 개를 파이썬으로 돌면 요청마다 수십~수백 ms 였다
+        scores = self._scores_for(features, opts)
+        finals = similarities * scores.boost
+        keep = np.ones(len(similarities), dtype=bool)
+        if only is None:  # '본 것만'에선 취향과 반대인 작품도 순위에 둔다
+            keep &= similarities > 0
+        if not opts.include_adult:
+            keep &= ~scores.adult
+        sunk = scores.stingy & opts.sink_stingy
+        # scoring.sort_key 와 같은 순서: (유료위주 여부, -점수). lexsort 는 안정 정렬이라 동점은 행 순서 그대로
+        order = np.lexsort((-finals, sunk))
         recs = []
-        for row, sim in enumerate(similarities):
-            if sim <= 0 and only is None:  # '본 것만'에선 취향과 반대인 작품도 순위에 둔다
+        for row in order[keep[order]]:
+            no = features.product_nos[row]
+            if only is not None and no not in only:
                 continue
-            comic = self._comics[features.product_nos[row]]
-            if only is not None and comic.product_no not in only:
+            if no in exclude or self._work[no] in exclude_works:
                 continue
-            if comic.product_no in exclude or self._work[comic.product_no] in exclude_works:
-                continue
-            if not opts.include_adult and scoring.is_adult(comic):
-                continue
-            b = scoring.boost(comic, opts)
             recs.append(
                 Recommendation(
-                    comic=comic,
-                    similarity=float(sim),
-                    boost=b,
-                    final=float(sim) * b,
-                    stingy=scoring.is_stingy(comic, opts),
+                    comic=self._comics[no],
+                    similarity=float(similarities[row]),
+                    boost=float(scores.boost[row]),
+                    final=float(finals[row]),
+                    stingy=bool(scores.stingy[row]),
                 )
             )
-        recs.sort(key=lambda r: scoring.sort_key(r.final, r.stingy, opts))
         # 판본 묶기: 같은 작품은 가장 앞선(점수 높은) 판본 하나만 남기고, 나머지 수를 적어 둔다
         first: dict[str, Recommendation] = {}
         unique = []
@@ -398,25 +478,33 @@ class Engine:
         if not liked:
             return
         liked_idx = [row for row, _ in liked]
-        liked_matrix = features.matrix[liked_idx]
         liked_nos = [features.product_nos[row] for row in liked_idx]
-        for rec in recs:
-            if rec.comic.product_no not in features.index:
-                continue
+        liked_works = np.array([self._work[no] for no in liked_nos], dtype=object)
+        page = [rec for rec in recs if rec.comic.product_no in features.index]
+        if not page:
+            return
+        # 좋아한 작품 × 이 페이지 작품 유사도를 한 번에 (카드마다 희소 행렬을 잘라 곱하던 걸 묶었다)
+        page_rows = [features.index[rec.comic.product_no] for rec in page]
+        sims_all = (features.matrix[liked_idx] @ features.matrix[page_rows].T).toarray()
+        meta = features.meta_matrix
+        liked_meta = meta[liked_idx] if meta.shape[1] else None
+        theirs_all = np.asarray(liked_meta.sum(axis=0)).ravel() if liked_meta is not None else None
+        for j, rec in enumerate(page):
             # '본 것 포함'에선 후보가 내가 좋아한 작품 자신일 수 있다 → 같은 작품(판본 포함)은 '닮은 작품'에서 뺀다
-            own = self._work[rec.comic.product_no]
-            others = [i for i, no in enumerate(liked_nos) if self._work[no] != own]
-            if not others:
+            others = liked_works != self._work[rec.comic.product_no]
+            if not others.any():
                 continue
-            sims = np.asarray(
-                (liked_matrix[others] @ features.row(rec.comic.product_no).T).todense()
-            ).ravel()
+            sims = np.where(others, sims_all[:, j], -np.inf)
             best = int(np.argmax(sims))
             if sims[best] > 0:
-                rec.because = self._comics[liked_nos[others[best]]]
-            rec.shared = self._shared_tokens(
-                features, rec.comic.product_no, [liked_nos[i] for i in others]
-            )
+                rec.because = self._comics[liked_nos[best]]
+            if liked_meta is not None:
+                theirs = (
+                    theirs_all
+                    if others.all()
+                    else np.asarray(liked_meta[others].sum(axis=0)).ravel()
+                )
+                rec.shared = self._top_shared(features, page_rows[j], theirs)
 
     def _shared_tokens(
         self, features: ItemFeatures, product_no: int, others: list[int], top: int = 4
@@ -424,9 +512,14 @@ class Engine:
         meta = features.meta_matrix
         if meta.shape[1] == 0:
             return []
-        mine = meta[features.index[product_no]]
-        theirs = meta[[features.index[no] for no in others]].sum(axis=0)
-        theirs = np.asarray(theirs).ravel()
+        theirs = np.asarray(meta[[features.index[no] for no in others]].sum(axis=0)).ravel()
+        return self._top_shared(features, features.index[product_no], theirs, top)
+
+    def _top_shared(
+        self, features: ItemFeatures, row: int, theirs: np.ndarray, top: int = 4
+    ) -> list[str]:
+        """row 작품의 메타 토큰 중 theirs(다른 작품들의 메타 합)와 겹치는 것, 무거운 순으로."""
+        mine = features.meta_matrix[row]
         scored = [(mine[0, col] * theirs[col], col) for col in mine.indices if theirs[col] > 0]
         scored.sort(reverse=True)
         return [str(features.meta_vocab[col]) for _, col in scored[:top]]

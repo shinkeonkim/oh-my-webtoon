@@ -90,6 +90,40 @@ def test_cache_rebuilds_after_new_comic(library):
     assert "천마 회귀 2부" not in before and "천마 회귀 2부" in after
 
 
+def test_background_refresh_serves_old_until_rebuilt(library):
+    """크롤러가 도는 웹 서버: 작품이 바뀌어도 요청은 이전 벡터로 바로 답하고, 다시 만드는 건 뒤에서 한다.
+    수집 중에는 간격(refresh_interval)마다 한 번만, 수집이 끝나면(invalidate) 바로 다시 만든다."""
+    import threading
+    import time
+
+    from .conftest import comic_data
+
+    engine = Engine(refresh_interval=3600)
+    release = threading.Event()  # 작은 DB 라 순식간에 끝나므로, '만드는 중'을 붙잡아 둔다
+    compute = engine._compute
+    engine._compute = lambda comics: (release.wait(10), compute(comics))[1]
+    new = comic_data(
+        8, "천마 회귀 2부", genre="무협", tags=["회귀"], authors=["김무협"],
+        synopsis="천마가 다시 회귀한다 무림", crawled_at="2099-01-01T00:00:00+00:00",
+    )  # fmt: skip
+    with db.session(library) as conn:
+        db.update_review(conn, ME, 1, score=10)
+        release.set()  # 첫 빌드는 그냥 통과
+        engine.recommend(conn, ME, ScoringOptions())
+        release.clear()
+        db.upsert_comic(conn, new)
+        # 간격이 안 지났으니 다시 만들지도 않는다 — 이전 순위 그대로
+        assert "천마 회귀 2부" not in titles(engine.recommend(conn, ME, ScoringOptions()))
+        engine.invalidate()
+        # 다시 만들기 시작한 이 요청도 기다리지 않고 이전 순위로 답한다
+        assert "천마 회귀 2부" not in titles(engine.recommend(conn, ME, ScoringOptions()))
+        release.set()
+        deadline = time.monotonic() + 10
+        while engine._refreshing and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert "천마 회귀 2부" in titles(engine.recommend(conn, ME, ScoringOptions()))
+
+
 def test_status_only_review_is_enough_to_start(library):
     """점수 없이 '봤음'만 눌러도 추천이 시작된다."""
     with db.session(library) as conn:

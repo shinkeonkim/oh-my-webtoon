@@ -51,6 +51,7 @@ from ..config import Settings, load_settings
 from ..crawler import runner
 from ..recommender import Engine, ScoringOptions
 from ..recommender import scoring as scoring_mod
+from ..recommender.engine import REFRESH_INTERVAL
 from . import auth, prom
 from .metrics import RequestLog
 from .prom import Metrics
@@ -86,7 +87,8 @@ SCORE_FILTERS = {  # /users/{name}?score=...  점수는 0~10(=별 반 개 단위
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
-    engine = Engine()
+    # 크롤러가 같은 프로세스에서 돌면 수집 중 작품 데이터가 계속 바뀐다 — 벡터는 뒤에서 다시 만든다 (engine.py)
+    engine = Engine(refresh_interval=REFRESH_INTERVAL if settings.crawl_enabled else None)
     crawler = runner.BackgroundCrawler(settings.database_path, settings)
     crawler.on_finish = engine.invalidate
     stop_backup = threading.Event()
