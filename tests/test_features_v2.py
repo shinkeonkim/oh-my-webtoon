@@ -396,6 +396,7 @@ def test_prometheus_metrics(client, library):
     assert 'mywebtoon_reviews{status="watching"} 1.0' in text
     assert 'mywebtoon_crawl_last_pages{result="skipped"} 2.0' in text
     assert "mywebtoon_crawl_last_finished_timestamp_seconds" in text
+    assert 'mywebtoon_comic_changes_24h{field="free_episodes"} 0.0' in text  # 변경 없어도 0 으로
     assert "mywebtoon_db_up 1.0" in text  # process_* 는 /proc 이 있는 리눅스(파드)에서만 나온다
     assert client.get("/metrics").status_code == 404  # 공개 포트에는 없다
 

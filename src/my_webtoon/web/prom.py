@@ -122,10 +122,15 @@ class AppCollector:
         since = datetime.fromtimestamp(time.time() - 86400, UTC).isoformat(
             timespec="seconds"
         )  # db.now_iso() 형식
-        for field, n in conn.execute(
-            "SELECT field, COUNT(*) FROM comic_changes WHERE changed_at >= ? GROUP BY field",
-            (since,),
-        ):
+        # 변경이 없던 항목도 0 으로 내보낸다 — 시계열이 없으면 Grafana 가 '0' 대신 'No data' 를 그린다.
+        counts = dict.fromkeys((*db.TRACKED_FIELDS, "promo"), 0)
+        counts.update(
+            conn.execute(
+                "SELECT field, COUNT(*) FROM comic_changes WHERE changed_at >= ? GROUP BY field",
+                (since,),
+            ).fetchall()
+        )
+        for field, n in counts.items():
             changes.add_metric([field], n)
         yield changes
 
