@@ -1,0 +1,68 @@
+# 모니터링 — oh-my-homelab 의 kube-prometheus-stack 이 라벨 제한 없이 클러스터 전역에서 잡아간다
+# (serviceMonitorSelectorNilUsesHelmValues / ruleSelectorNilUsesHelmValues: false).
+#   ServiceMonitor  Service 의 metrics 포트(9464)를 30초마다 긁는다. 메트릭 목록: src/my_webtoon/web/prom.py
+#   PrometheusRule  알림 → Alertmanager → Slack
+#   대시보드         kustomization.yaml 의 configMapGenerator (grafana-dashboard.json, deploy/dashboard.py 로 생성)
+# NetworkPolicy(monitoring → 9464 허용)는 oh-my-homelab helm-charts/network-policies/my-webtoon.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: my-webtoon
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: my-webtoon
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: my-webtoon
+spec:
+  groups:
+    - name: my-webtoon
+      rules:
+        - alert: MyWebtoonDown
+          expr: absent(up{namespace="my-webtoon", job="my-webtoon"} == 1)
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: my-webtoon 이 응답하지 않아요
+            description: 5분 넘게 /metrics 를 긁을 수 있는 파드가 없어요. kubectl -n my-webtoon get pods 로 확인하세요.
+        - alert: MyWebtoonCrawlStale
+          expr: time() - max(mywebtoon_crawl_last_finished_timestamp_seconds{namespace="my-webtoon"}) > 12 * 3600
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: my-webtoon 수집이 12시간 넘게 멈췄어요
+            description: 3시간마다 돌아야 하는 크롤러가 12시간 넘게 끝난 기록이 없어요. /crawl 화면과 로그를 확인하세요.
+        - alert: MyWebtoonCrawlFailing
+          expr: max(mywebtoon_crawl_last_pages{namespace="my-webtoon", result="failed"}) > 50
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: my-webtoon 마지막 수집에서 실패가 많아요
+            description: 마지막 수집에서 {{ $value }}개 페이지가 실패했어요. 네이버 페이지 구조가 바뀌었거나 차단됐을 수 있어요.
+        - alert: MyWebtoonBackupStale
+          expr: time() - max(mywebtoon_backup_last_timestamp_seconds{namespace="my-webtoon"}) > 36 * 3600
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: my-webtoon 백업이 36시간 넘게 없어요
+            description: 하루 한 번 해야 하는 백업이 밀렸어요. BACKUP_DIR(NFS) 마운트를 확인하세요.
+        - alert: MyWebtoonBackupCheckFailed
+          expr: min(mywebtoon_backup_last_ok{namespace="my-webtoon"}) == 0
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: my-webtoon 백업 검사 실패
+            description: 마지막 백업 사본이 integrity_check 를 통과하지 못했거나 행 수가 원본과 달라요. /settings 에서 내용을 보세요.
+        - alert: MyWebtoonErrors
+          expr: sum(increase(mywebtoon_http_requests_total{namespace="my-webtoon", status=~"5.."}[15m])) > 5
+          labels: { severity: warning }
+          annotations:
+            summary: my-webtoon 5xx 응답이 늘었어요
+            description: 지난 15분 동안 5xx 응답이 {{ $value | humanize }}건이에요. Grafana my-webtoon 대시보드의 로그 패널을 보세요.

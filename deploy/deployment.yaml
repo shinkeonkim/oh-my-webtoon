@@ -46,6 +46,8 @@ spec:
           ports:
             - name: http
               containerPort: 8000
+            - name: metrics # /metrics (src/my_webtoon/web/prom.py)
+              containerPort: 9464
           env:
             - { name: DATABASE_PATH, value: /data/my-webtoon.db }
             - { name: CRAWL_ENABLED, value: "1" }
@@ -54,6 +56,7 @@ spec:
             - { name: CRAWL_DELAY_SECONDS, value: "1.5" }
             - { name: EXCLUDED_GENRES, value: "BL" } # 쉼표로 여러 개. 비우면 전 장르 수집
             - { name: BACKUP_DIR, value: /backup }
+            - { name: METRICS_PORT, value: "9464" }
             - { name: HOME, value: /tmp }
           envFrom:
             - secretRef:

@@ -53,10 +53,11 @@ from ..recommender import Engine, ScoringOptions
 from ..recommender import scoring as scoring_mod
 from . import auth
 from .metrics import RequestLog
+from .prom import Metrics
 
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
-ALWAYS_PUBLIC = ("/login", "/static", "/healthz", "/readyz")
+ALWAYS_PUBLIC = ("/login", "/demo", "/static", "/healthz", "/readyz")
 PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui")  # 읽기 전용 공개 화면
 NEWS_DAYS = 30  # 소식 화면이 보여 주는 기간
 REVIEWED_FILTERS = {
@@ -131,13 +132,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.crawl_enabled:
             crawler.start()
         threading.Thread(target=maintenance_loop, name="maintenance", daemon=True).start()
+        if settings.metrics_port:
+            prometheus.serve(settings.metrics_port)
         yield
+        prometheus.stop()
         crawler.stop()
         stop_backup.set()
 
     app = FastAPI(title="my-webtoon", lifespan=lifespan)
     app.state.settings, app.state.engine, app.state.crawler = settings, engine, crawler
     request_log = app.state.request_log = RequestLog()
+    app.state.ready = ready
+    prometheus = app.state.prometheus = Metrics(settings.database_path, app.state)
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(
         free_label=free_label,
@@ -196,11 +202,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         started = time.perf_counter()
         response = await call_next(request)
         route = request.scope.get("route")
-        request_log.add(
-            getattr(route, "path", request.url.path),
-            (time.perf_counter() - started) * 1000,
-            response.status_code,
-        )
+        path = getattr(route, "path", None)
+        elapsed = time.perf_counter() - started
+        request_log.add(path or request.url.path, elapsed * 1000, response.status_code)
+        # Prometheus 라벨은 라우트 패턴만 — 없는 주소(404)를 그대로 넣으면 라벨이 끝없이 늘어난다
+        prometheus.observe(path or "(unmatched)", request.method, response.status_code, elapsed)
         return response
 
     def get_conn() -> Iterator:
@@ -852,8 +858,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # -- 로그인 ----------------------------------------------------------------
 
     @app.get("/login", response_class=HTMLResponse)
-    def login_page(request: Request, error: str = ""):
-        return render(request, "login.html", error=error)
+    def login_page(request: Request, error: str = "", conn=Depends(get_conn)):
+        demo_user = db.get_user_by_name(conn, settings.demo_username)
+        return render(
+            request, "login.html", error=error, has_demo=bool(demo_user and demo_user.is_demo)
+        )
 
     @app.post("/login")
     def login(
@@ -865,6 +874,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = auth.authenticate(conn, username, password)
         if user is None:
             return RedirectResponse("/login?error=1", status_code=303)
+        request.session.update(user_id=user.id, epoch=user.session_epoch)
+        return RedirectResponse("/", status_code=303)
+
+    @app.get("/demo")
+    def demo_login(request: Request, conn=Depends(get_conn)):
+        """공유용 링크: 데모 계정으로 바로 로그인한다. 데모 계정은 망가뜨려도 매일 밤 되돌아간다(demo.py).
+
+        데모로 지정된 계정(is_demo)일 때만 동작한다 — DEMO_USERNAME 을 실수로 진짜 계정으로 바꿔도
+        그 계정이 열리지 않게. 다른 계정으로 로그인해 있었어도 데모 계정으로 바꾼다(링크가 늘 같은 화면을 열도록).
+        """
+        user = db.get_user_by_name(conn, settings.demo_username)
+        if user is None or not user.is_demo:
+            raise HTTPException(404, "데모 계정이 없어요")
+        request.session.clear()
         request.session.update(user_id=user.id, epoch=user.session_epoch)
         return RedirectResponse("/", status_code=303)
 

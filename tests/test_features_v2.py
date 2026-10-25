@@ -365,3 +365,51 @@ def test_series_import_defaults_to_watching(client, library):
     assert 'value="watching" id="status-watching" checked' in preview
     client.post("/import/series", data={"no": ["1"]})
     assert review(library, 1).status == "watching"
+
+
+# -- Prometheus 메트릭 ---------------------------------------------------------
+
+
+def test_prometheus_metrics(client, library):
+    client.get("/comics")
+    client.get("/comic/1")
+    client.get("/없는-주소")
+    client.post("/reviews/1", data={"status": "watching"}, headers=HX)
+    with db.session(library) as conn:
+        run = db.start_run(conn)
+        db.finish_run(conn, run, fetched=3, discovered=1, failed=0, note="", skipped=2)
+
+    text = client.app.state.prometheus.text().decode()
+    assert (
+        'mywebtoon_http_requests_total{method="GET",route="/comic/{product_no}",status="200"} 1.0'
+        in text
+    )
+    assert 'route="(unmatched)"' in text and "없는" not in text  # 라벨이 주소마다 늘지 않는다
+    assert "/healthz" not in text
+    assert 'mywebtoon_comics{status="연재중"}' in text
+    assert 'mywebtoon_reviews{status="watching"} 1.0' in text
+    assert 'mywebtoon_crawl_last_pages{result="skipped"} 2.0' in text
+    assert "mywebtoon_crawl_last_finished_timestamp_seconds" in text
+    assert "mywebtoon_db_up 1.0" in text  # process_* 는 /proc 이 있는 리눅스(파드)에서만 나온다
+    assert client.get("/metrics").status_code == 404  # 공개 포트에는 없다
+
+
+def test_metrics_server_listens_on_its_own_port(library):
+    import socket
+    import urllib.request
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from my_webtoon.config import load_settings
+    from my_webtoon.web.app import create_app
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    settings = replace(
+        load_settings(), database_path=library, crawl_enabled=False, metrics_port=port
+    )
+    with TestClient(create_app(settings)):
+        body = urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=5).read()
+        assert b"mywebtoon_comics" in body

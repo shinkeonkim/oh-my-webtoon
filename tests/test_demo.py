@@ -94,3 +94,33 @@ def test_cli_demo_command(library, monkeypatch, capsys):
     cli.main(["user", "list"])
     out = capsys.readouterr().out
     assert "기준 평가 1개" in out and "데모" in out
+
+
+def _app(library):
+    settings = replace(
+        load_settings(), database_path=library, app_password="admin-pw", crawl_enabled=False
+    )
+    return TestClient(create_app(settings))
+
+
+def test_demo_link_logs_in_as_demo_account(library):
+    with _app(library) as c:
+        assert c.get("/demo", follow_redirects=False).status_code == 404  # 아직 데모 계정이 없다
+        assert "데모 계정으로 둘러보기" not in c.get("/login").text
+
+    setup_demo(library)
+    with _app(library) as c:
+        assert 'href="/demo"' in c.get("/login").text
+        r = c.get("/demo", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/"
+        assert "시연용 계정이에요" in c.get("/").text
+
+        c.post("/login", data={"username": "singun11", "password": "admin-pw"})
+        c.get("/demo")  # 관리자로 로그인해 있어도 링크는 늘 데모 계정을 연다
+        assert "시연용 계정이에요" in c.get("/").text
+
+
+def test_demo_link_never_opens_a_real_account(library, monkeypatch):
+    monkeypatch.setenv("DEMO_USERNAME", "singun11")  # 실수로 진짜 계정을 가리켜도
+    with _app(library) as c:
+        assert c.get("/demo", follow_redirects=False).status_code == 404

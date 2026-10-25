@@ -10,5 +10,6 @@
     {% call ui.field('비밀번호') %}<input class="input" type="password" name="password" autocomplete="current-password" required>{% endcall %}
     {{ ui.button('로그인', 'primary') }}
   </form>
+  {% if has_demo %}<p class="login__demo">계정이 없나요? {{ ui.button('데모 계정으로 둘러보기', 'secondary', href='/demo') }}</p>{% endif %}
 </section>
 {% endblock %}

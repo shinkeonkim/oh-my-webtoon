@@ -495,6 +495,7 @@ footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); pa
 
 .login { max-width: 340px; margin: 12vh auto; }
 .login__form { max-width: none; }
+.login__demo { display: flex; align-items: center; justify-content: center; gap: var(--space-2); margin-top: var(--space-4); font-size: var(--text-sm); color: var(--text-2); }
 .filters { display: flex; flex-direction: column; gap: var(--space-2); }
 .detail__review { border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
 .login h1 { text-align: center; color: var(--accent); margin-bottom: var(--space-5); }

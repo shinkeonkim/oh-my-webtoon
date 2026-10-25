@@ -13,3 +13,6 @@ spec:
     - name: http
       port: 80
       targetPort: http
+    - name: metrics # Prometheus 전용 (monitoring.yaml). 터널은 80 에만 붙어서 공개 도메인으로는 안 보인다
+      port: 9464
+      targetPort: metrics

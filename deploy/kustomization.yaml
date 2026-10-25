@@ -9,6 +9,16 @@ resources:
 - deployment.yaml
 - service.yaml
 - ingress.yaml
+- monitoring.yaml
+# Grafana 대시보드 (monitoring.yaml 주석 참고). 이름이 바뀌지 않게 해시 접미사를 끈다.
+configMapGenerator:
+- name: my-webtoon-grafana-dashboard
+  files:
+  - my-webtoon.json=grafana-dashboard.json
+  options:
+    disableNameSuffixHash: true
+    labels:
+      grafana_dashboard: "1"
 labels:
 - pairs:
     app.kubernetes.io/part-of: my-webtoon

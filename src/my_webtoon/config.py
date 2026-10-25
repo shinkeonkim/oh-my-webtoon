@@ -36,6 +36,10 @@ class Settings:
     excluded_genres: frozenset[str]
     # 하루 한 번 DB 사본을 둘 디렉터리 (다른 디스크 권장). 비어 있으면 자동 백업을 안 한다.
     backup_dir: Path | None
+    # Prometheus /metrics 를 여는 포트 (web/prom.py). 비어 있으면 열지 않는다. 공개 포트(8000)와 따로 둔다.
+    metrics_port: int | None
+    # /demo 로 들어오면 바로 로그인시켜 줄 데모 계정 (demo.py). 데모로 지정된 계정일 때만 동작한다.
+    demo_username: str
 
 
 def load_settings() -> Settings:
@@ -58,4 +62,6 @@ def load_settings() -> Settings:
             g.strip() for g in os.environ.get("EXCLUDED_GENRES", "BL").split(",") if g.strip()
         ),
         backup_dir=Path(os.environ["BACKUP_DIR"]) if os.environ.get("BACKUP_DIR") else None,
+        metrics_port=int(os.environ["METRICS_PORT"]) if os.environ.get("METRICS_PORT") else None,
+        demo_username=os.environ.get("DEMO_USERNAME", "test"),
     )
