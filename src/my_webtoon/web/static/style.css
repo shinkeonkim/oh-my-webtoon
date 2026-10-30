@@ -326,7 +326,7 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
 }
 .nav__sub a:hover, .usermenu__panel a:hover, .usermenu__panel button:hover { background: var(--surface-2); color: var(--text); }
 .nav__sub a.is-on, .usermenu__panel a.is-on { color: var(--text); font-weight: 700; }
-/* 위 메뉴 검색 + 자동완성 목록 */
+/* 위 메뉴 검색 + 자동완성 목록 (.search__list 는 평가 화면 검색칸 등 다른 곳에서도 쓴다 — _ui.html suggest_list) */
 .search { position: relative; flex: 0 1 280px; min-width: 0; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px;
   border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--text-3); }
 .search:focus-within { border-color: var(--accent); box-shadow: var(--focus); }
@@ -386,7 +386,8 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
   .brand { font-size: 0; gap: 0; }  /* 좁은 화면: 로고만 남기고 검색창에 자리를 준다 */
   .search { flex: 1; }
   .search__key { display: none; }
-  .search__list { position: fixed; top: 56px; left: var(--space-4); right: var(--space-4); width: auto; }
+  .search .search__list { position: fixed; top: 56px; left: var(--space-4); right: var(--space-4); width: auto; }
+  .input-icon .search__list { width: 100%; }
   .topbar__inner { height: 52px; justify-content: space-between; }
   .tabbar {
     display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;

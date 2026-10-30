@@ -59,12 +59,9 @@
       {#- 작품 검색. 치는 동안 자동완성(/search/suggest)이 뜨고 항목을 누르면 바로 상세로, Enter 는 전체 결과(/comics?q=) -#}
       <form class="search" action="/comics" method="get" role="search">
         {{ ui.icon('search', 16) }}
-        <input class="search__input" type="search" name="q" placeholder="작품·작가 검색" autocomplete="off" aria-label="작품 검색"
-               value="{{ request.query_params.get('q', '') if path in ('/comics', '/rate') else '' }}"
-               role="combobox" aria-expanded="false" aria-controls="search-suggest" aria-autocomplete="list"
-               hx-get="/search/suggest" hx-trigger="input changed delay:150ms, search" hx-target="#search-suggest" hx-sync="this:replace">
+        <input class="search__input" type="search" name="q" placeholder="작품·작가 검색" aria-label="작품 검색" {{ ui.suggest_attrs('search-suggest') }}>
         <kbd class="search__key" aria-hidden="true">/</kbd>
-        <div id="search-suggest" class="search__list" role="listbox"></div>
+        {{ ui.suggest_list('search-suggest') }}
       </form>
       <div class="topbar__user">
         {%- if authed %}
@@ -125,15 +122,16 @@
         b.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
     }
-    // 검색 자동완성: 결과가 오면 열고, ↓/↑ 로 항목 이동, Esc·바깥 클릭으로 닫는다. '/' 를 누르면 검색창으로.
-    (() => {
-      const input = document.querySelector('.search__input');
-      const list = document.getElementById('search-suggest');
-      if (!input || !list) return;
+    // 검색 자동완성 (_ui.html suggest_attrs): 결과가 오면 열고, ↓/↑ 로 항목 이동, Esc·바깥 클릭으로 닫는다.
+    // 위 메뉴·평가 화면 등 data-suggest 가 붙은 입력칸마다 따로 동작한다. '/' 를 누르면 위 메뉴 검색창으로.
+    document.querySelectorAll('[data-suggest]').forEach((input) => {
+      const list = document.getElementById(input.dataset.suggest);
+      if (!list) return;
+      const box = list.parentElement;
       const items = () => [...list.querySelectorAll('.search__item')];
       const setOpen = (open) => { list.classList.toggle('is-open', open); input.setAttribute('aria-expanded', open ? 'true' : 'false'); };
       const close = () => setOpen(false);
-      list.addEventListener('htmx:afterSwap', () => setOpen(list.children.length > 0 && input.value.trim() !== ''));
+      list.addEventListener('htmx:afterSwap', () => setOpen(list.children.length > 0 && input.value.trim() !== '' && document.activeElement === input));
       input.addEventListener('focus', () => { if (list.children.length && input.value.trim()) setOpen(true); });
       input.addEventListener('input', () => { if (!input.value.trim()) { list.innerHTML = ''; close(); } });
       const move = (from, step) => {
@@ -145,18 +143,20 @@
       input.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowDown' && list.classList.contains('is-open')) { e.preventDefault(); move(null, 1); }
         if (e.key === 'Escape') close();
+        if (e.key === 'Enter') close();  // 폼 제출(전체 결과)로 넘어간다
       });
       list.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowDown') { e.preventDefault(); move(document.activeElement, 1); }
         if (e.key === 'ArrowUp') { e.preventDefault(); move(document.activeElement, -1); }
         if (e.key === 'Escape') { close(); input.focus(); }
       });
-      document.addEventListener('click', (e) => { if (!e.target.closest('.search')) close(); });
-      document.addEventListener('keydown', (e) => {
-        const typing = e.target.closest('input, textarea, select, [contenteditable]');
-        if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); input.focus(); input.select(); }
-      });
-    })();
+      document.addEventListener('click', (e) => { if (!box.contains(e.target)) close(); });
+    });
+    document.addEventListener('keydown', (e) => {
+      const typing = e.target.closest('input, textarea, select, [contenteditable]');
+      const top = document.querySelector('.search__input');
+      if (e.key === '/' && top && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); top.focus(); top.select(); }
+    });
     // 내 메뉴: 바깥을 누르거나 Esc 를 누르면 닫는다 (<details> 는 기본으로는 다시 눌러야만 닫힌다)
     document.addEventListener('click', (e) => {
       document.querySelectorAll('details.usermenu[open]').forEach((d) => { if (!d.contains(e.target)) d.open = false; });

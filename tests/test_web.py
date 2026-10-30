@@ -350,6 +350,9 @@ def test_theme_rejects_unknown_value_and_foreign_redirect(client):
 
 def test_navbar_search_suggests_and_links_to_detail(client):
     assert 'class="search__input"' in client.get("/").text  # 모든 화면 위 메뉴에 검색창
+    rate = client.get("/rate").text  # 평가 화면 검색칸에도 같은 자동완성 (목록 id 는 따로)
+    assert 'data-suggest="browse-suggest"' in rate and 'id="browse-suggest"' in rate
+    assert rate.count('hx-get="/search/suggest"') == 2
     html = client.get("/search/suggest", params={"q": "천마"}).text
     assert "<html" not in html and 'href="/comic/1"' in html  # 조각만, 누르면 상세로
     assert "<mark>천마</mark>" in html

@@ -10,7 +10,7 @@
 {% endif %}
 
 <form class="toolbar" method="get" action="{{ base_path }}">
-  <span class="input-icon">{{ ui.icon('search') }}<input class="input" type="search" name="q" value="{{ q }}" placeholder="제목이나 작가"></span>
+  <span class="input-icon">{{ ui.icon('search') }}<input class="input" type="search" name="q" value="{{ q }}" placeholder="제목이나 작가" aria-label="작품 검색" {{ ui.suggest_attrs('browse-suggest') }}>{{ ui.suggest_list('browse-suggest') }}</span>
   {{ ui.select('genre', genres | map('pair') | list, genre, '모든 장르') }}
   {{ ui.select('sort', sorts.items() | map('sort_option') | list, sort, '정렬: 기본' if q else none) }}
   {{ ui.select('free', free_filters.items() | list, free, '무료 상관없이') }}

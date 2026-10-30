@@ -42,7 +42,7 @@
   <div class="form-grid">
     {% call ui.field('입력', '도움말') %}<input class="input" placeholder="텍스트">{% endcall %}
     {% call ui.field('셀렉트') %}{{ ui.select('x', [('a', '가'), ('b', '나')], 'a') }}{% endcall %}
-    <span class="input-icon">{{ ui.icon('search') }}<input class="input" placeholder="검색"></span>
+    <span class="input-icon">{{ ui.icon('search') }}<input class="input" type="search" name="q" placeholder="검색 (자동완성)" aria-label="작품 검색" {{ ui.suggest_attrs('ui-suggest') }}>{{ ui.suggest_list('ui-suggest') }}</span>
   </div>
   <div class="mt-3">{{ ui.tabs([('#', '전체', none, true), ('#', '봤음', 12, false), ('#', '보는 중', 3, false)], '예시') }}</div>
 </section>

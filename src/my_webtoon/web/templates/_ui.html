@@ -51,6 +51,17 @@
 <span class="badge badge--{{ tone }}">{% if icon_name %}{{ icon(icon_name, 12) }}{% endif %}{{ text }}</span>
 {%- endmacro %}
 
+{#- 작품 검색 자동완성. 검색 입력칸에 suggest_attrs(목록 id) 를 붙이고, 같은 (position: relative) 상자 안에
+    suggest_list(목록 id) 를 둔다. 치는 동안 /search/suggest 가 작품 몇 개를 채우고, 누르면 바로 상세로 간다.
+    Enter 는 원래 폼 제출 그대로 (위 메뉴는 전체 결과, 평가 화면은 필터와 함께 목록). 키보드·열고 닫기는 base.html 스크립트. -#}
+{% macro suggest_attrs(list_id) -%}
+autocomplete="off" role="combobox" aria-expanded="false" aria-controls="{{ list_id }}" aria-autocomplete="list" data-suggest="{{ list_id }}"
+hx-get="/search/suggest" hx-trigger="input changed delay:150ms, search" hx-target="#{{ list_id }}" hx-sync="this:replace"
+{%- endmacro %}
+{% macro suggest_list(list_id) -%}
+<div id="{{ list_id }}" class="search__list" role="listbox"></div>
+{%- endmacro %}
+
 {#- 카드의 추천도 배지. 값이 없어도(취향이 아직 없음) 빈 자리를 남긴다 — 첫 평가 직후 hx-swap-oob 로 채우려고.
     색 기준은 상세 화면과 같다 (app.match_tone) -#}
 {% macro match_badge(no, percent, oob=False, anchored=True) -%}
