@@ -162,6 +162,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reason_label=reason_label,
         news_label=news_label,
         reading_progress=reading_progress,
+        match_tone=match_tone,
+        MATCH_TONE_LABELS=MATCH_TONE_LABELS,
         static_version=static_version(HERE / "static"),
         STATUSES=db.STATUSES,
         ASPECTS=db.ASPECTS,
@@ -245,12 +247,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def my_id(request: Request) -> int | None:
         return request.state.user.id if request.state.user else None
 
+    def lazy_match(request: Request, user_id: int):
+        """카드의 추천도 배지. 카드가 하나라도 그려질 때 처음 한 번만 전체를 계산한다 (카드 없는 화면은 공짜)."""
+        cache: dict[int, int] | None = None
+
+        def match_of(product_no: int) -> int | None:
+            nonlocal cache
+            if cache is None:
+                with db.session(settings.database_path) as conn:
+                    cache = engine.match_percents(conn, user_id, options_from_query(request))
+            return cache.get(product_no)
+
+        return match_of
+
     def render(request: Request, name: str, **ctx) -> HTMLResponse:
         user = request.state.user
         ctx.setdefault("user", user)
         ctx.setdefault("authed", user is not None)
         ctx.setdefault("can_logout", not request.state.open_mode)
         ctx.setdefault("theme", theme_of(request))
+        if user is not None:
+            ctx.setdefault("match_of", lazy_match(request, user.id))
         return templates.TemplateResponse(request, name, ctx)
 
     # -- 추천 -----------------------------------------------------------------
@@ -1013,6 +1030,23 @@ def parse_product_no(text: str) -> int | None:
 
 
 MOBILE_UA = re.compile(r"Android|iPhone|iPad|iPod|Mobile")
+
+
+def match_tone(percent: int) -> str:
+    """추천도 구간 → 색 (style.css 의 .match--* / .badge--match-*). 상세 화면과 목록 카드가 같은 기준을 쓴다.
+
+    상위 10%·30%·60% 로 자른다 — 작품 수천 개 중 위쪽 몇 %인지라서 50 이 '보통'이다.
+    """
+    if percent >= 90:
+        return "top"
+    if percent >= 70:
+        return "high"
+    if percent >= 40:
+        return "mid"
+    return "low"
+
+
+MATCH_TONE_LABELS = {"top": "강력 추천", "high": "추천", "mid": "보통", "low": "취향 밖"}
 
 
 def theme_of(request: Request) -> str:

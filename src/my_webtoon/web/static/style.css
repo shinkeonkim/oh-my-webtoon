@@ -28,6 +28,8 @@
   --warn-soft: #fdeee4;
   --promo: #7c3aed;
   --promo-soft: #f1eafe;
+  --fair: #b45309;            /* 추천도 '보통' */
+  --fair-soft: #fdf3dc;
   --focus: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 
   --space-1: 4px;
@@ -74,6 +76,8 @@
     --warn-soft: #36210f;
     --promo: #b69cff;
     --promo-soft: #261d3d;
+    --fair: #fbbf24;
+    --fair-soft: #33270c;
     --shadow: none;
   }
 }
@@ -96,6 +100,8 @@
   --warn-soft: #36210f;
   --promo: #b69cff;
   --promo-soft: #261d3d;
+  --fair: #fbbf24;
+  --fair-soft: #33270c;
   --shadow: none;
 }
 
@@ -158,6 +164,11 @@ code { font-size: 0.85em; background: var(--surface-2); padding: 1px 5px; border
 .badge--solid { background: var(--accent); color: var(--on-accent); font-weight: 700; }
 .badge--warn { background: var(--warn-soft); color: var(--warn); }
 .badge--promo { background: var(--promo-soft); color: var(--promo); }
+/* 추천도 배지 (목록 카드) — 상세 화면 .match--* 와 같은 구간·색 */
+.badge--match-top { background: var(--accent); color: var(--on-accent); font-weight: 800; font-variant-numeric: tabular-nums; }
+.badge--match-high { background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; font-variant-numeric: tabular-nums; }
+.badge--match-mid { background: var(--fair-soft); color: var(--fair); font-weight: 700; font-variant-numeric: tabular-nums; }
+.badge--match-low { background: var(--surface-2); color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* 칩 (토글) */
 .chip {
@@ -504,11 +515,22 @@ footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); pa
 }
 
 /* 작품 상세: 추천도 */
-.match { display: flex; flex-direction: column; gap: 6px; padding: var(--space-3) var(--space-4); border-radius: var(--radius); background: var(--accent-soft); }
-.match__head { display: flex; align-items: baseline; gap: var(--space-2); }
-.match__label { font-size: var(--text-sm); font-weight: 600; color: var(--accent-strong); }
-.match__value { font-size: 1.75rem; line-height: 1; color: var(--accent-strong); font-variant-numeric: tabular-nums; }
-.match .progress { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+/* 추천도 — 구간(app.match_tone)마다 색: top 진한 초록 · high 초록 · mid 노랑 · low 회색. 목록 카드 배지와 같은 색 */
+.match {
+  --m: var(--accent-strong); --m-bar: var(--accent); --m-soft: var(--accent-soft);
+  display: flex; flex-direction: column; gap: 6px; padding: var(--space-3) var(--space-4); border-radius: var(--radius);
+  background: var(--m-soft); border: 1px solid color-mix(in srgb, var(--m-bar) 25%, transparent);
+}
+.match--top { --m-soft: color-mix(in srgb, var(--accent) 22%, var(--surface)); border-color: var(--accent); }
+.match--mid { --m: var(--fair); --m-bar: var(--fair); --m-soft: var(--fair-soft); }
+.match--low { --m: var(--text-2); --m-bar: var(--text-3); --m-soft: var(--surface-2); }
+.match__head { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
+.match__label { font-size: var(--text-sm); font-weight: 600; color: var(--m); }
+.match__value { font-size: 1.75rem; line-height: 1; color: var(--m); font-variant-numeric: tabular-nums; }
+.match__tone { margin-left: auto; padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 700; color: var(--m); background: color-mix(in srgb, var(--m-bar) 14%, var(--surface)); }
+.match--top .match__tone { background: var(--accent); color: var(--on-accent); }
+.match .progress { background: color-mix(in srgb, var(--m-bar) 18%, var(--surface)); }
+.match .progress i { background: var(--m-bar); }
 .match__detail { font-size: var(--text-xs); color: var(--text-2); }
 
 /* 시리즈에서 가져오기 */

@@ -272,6 +272,34 @@ def test_match_score_on_detail(client, library):
     assert "이 작품 평가는 빼고 계산" in client.get("/comic/1").text
 
 
+def test_match_percents_equal_detail_match_score(library):
+    """목록 카드용 일괄 계산은 상세 화면의 작품별 계산과 값이 같아야 한다 (성인 포함/제외 둘 다)."""
+    with db.session(library) as conn:
+        db.update_review(conn, ME, 1, score=10)
+        db.update_review(conn, ME, 6, score=2)
+        engine = Engine()
+        for opts in (ScoringOptions(), ScoringOptions(include_adult=True)):
+            percents = engine.match_percents(conn, ME, opts)
+            assert percents and set(percents) == set(engine._comics)
+            for no, percent in percents.items():
+                assert percent == engine.match_score(conn, ME, no, opts)["percent"], no
+
+
+def test_match_tone_and_card_badge(client, library):
+    from my_webtoon.web.app import match_tone
+
+    assert [match_tone(p) for p in (100, 90, 89, 70, 69, 40, 39, 0)] == [
+        "top", "top", "high", "high", "mid", "mid", "low", "low",
+    ]  # fmt: skip
+    assert "badge--match-" not in client.get("/comics").text  # 취향이 없으면 배지도 없다
+    client.post("/reviews/1", data={"score": "10"}, headers=HX)
+    detail = client.get("/comic/2").text
+    tone = match_tone(_match(detail))
+    assert f'class="match match--{tone}"' in detail
+    listing = client.get("/comics").text
+    assert f'badge--match-{tone}" title="추천도 {_match(detail)} / 100' in listing
+
+
 def _match(html: str) -> int:
     import re
 

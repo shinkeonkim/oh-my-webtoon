@@ -26,6 +26,7 @@
   <h2>badge · chip</h2>
   <div class="ui-row">
     {{ ui.badge('neutral') }}{{ ui.badge('120화 무료', 'accent') }}{{ ui.badge('전화 무료', 'solid') }}{{ ui.badge('3화 무료', 'warn') }}{{ ui.badge('33화 무료 50일 남음', 'promo', icon_name='clock') }}{{ ui.badge('9.9', icon_name='star') }}
+    {%- for p in [95, 80, 55, 20] %}{{ ui.badge('추천도 ' ~ p, 'match-' ~ match_tone(p)) }}{% endfor %}
   </div>
   <div class="ui-row mt-3">{{ ui.chip('봤음', true) }}{{ ui.chip('보는 중') }}{{ ui.chip('하차') }}</div>
 </section>

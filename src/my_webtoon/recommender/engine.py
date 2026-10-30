@@ -255,6 +255,30 @@ class Engine:
             "left_out": product_no in reviews,
         }
 
+    def match_percents(
+        self, conn: sqlite3.Connection, user_id: int, opts: ScoringOptions
+    ) -> dict[int, int]:
+        """목록 카드용: 모든 작품의 추천도(match_score 의 percent)를 한 번에. 취향이 아직 없으면 빈 dict.
+
+        작품마다 match_score 를 부르면 수천 번 비교해야 하니, 비교 대상 점수를 한 번 정렬해 두고
+        searchsorted 로 '이보다 낮은 작품 수'를 센다 — 값은 match_score 와 같다.
+        """
+        features = self._load(conn)
+        if features is None:
+            return {}
+        sims = taste_similarities(features, db.all_reviews(conn, user_id), self.profile_opts)
+        if sims is None:
+            return {}
+        scores = self._scores_for(features, opts)
+        finals = sims * scores.boost
+        pool = np.sort(finals if opts.include_adult else finals[~scores.adult])
+        n = max(1, len(pool) - 1)
+        below = np.searchsorted(pool, finals, side="left")
+        return {
+            no: math.floor(100 * float(count) / n)
+            for no, count in zip(features.product_nos, below.tolist(), strict=True)
+        }
+
     def similar_to(
         self,
         conn: sqlite3.Connection,
