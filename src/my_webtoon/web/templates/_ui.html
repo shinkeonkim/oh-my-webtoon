@@ -51,6 +51,16 @@
 <span class="badge badge--{{ tone }}">{% if icon_name %}{{ icon(icon_name, 12) }}{% endif %}{{ text }}</span>
 {%- endmacro %}
 
+{#- 카드의 추천도 배지. 값이 없어도(취향이 아직 없음) 빈 자리를 남긴다 — 첫 평가 직후 hx-swap-oob 로 채우려고.
+    색 기준은 상세 화면과 같다 (app.match_tone) -#}
+{% macro match_badge(no, percent, oob=False) -%}
+{%- if percent is not none -%}
+<span id="match-{{ no }}" class="badge badge--match-{{ match_tone(percent) }}" title="추천도 {{ percent }} / 100 — {{ MATCH_TONE_LABELS[match_tone(percent)] }}"{% if oob %} hx-swap-oob="true"{% endif %}>추천도 {{ percent }}</span>
+{%- else -%}
+<span id="match-{{ no }}" hidden{% if oob %} hx-swap-oob="true"{% endif %}></span>
+{%- endif %}
+{%- endmacro %}
+
 {#- 토글 칩 (선택 상태가 있는 작은 버튼) -#}
 {% macro chip(label, on=False, attrs="") -%}
 <button class="chip{{ ' is-on' if on }}" type="button" aria-pressed="{{ 'true' if on else 'false' }}" {{ attrs | safe }}>{{ label }}</button>

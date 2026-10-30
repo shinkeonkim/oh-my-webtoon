@@ -1,0 +1,17 @@
+{#- 작품 상세의 추천도 상자. 필요한 변수: match(engine.match_score 결과 또는 None), authed, oob.
+    평가를 바꾸면 그 HTMX 응답에 hx-swap-oob 로 같이 실려 와 새로고침 없이 바뀐다 (app.review_widget). -#}
+{% import "_ui.html" as ui %}
+<div id="match-box"{% if oob %} hx-swap-oob="true"{% endif %}>
+{%- if match %}
+  {%- set tone = match_tone(match.percent) %}
+  <div class="match match--{{ tone }}" title="최종 점수(취향 유사도 × 무료·회차·평점 보정)가 전체 {{ match.total }}개 중 몇 위인지를 0~100으로">
+    <div class="match__head"><span class="match__label">추천도</span><b class="match__value">{{ match.percent }}</b><span class="muted small">/ 100 · {{ match.total }}개 중 {{ match.rank }}위</span><span class="match__tone">{{ MATCH_TONE_LABELS[tone] }}</span></div>
+    {{ ui.progress(match.percent, '추천도') }}
+    <p class="match__detail">취향 일치 {{ match.taste_percent }} · 보정 ×{{ '%.2f' % match.boost }}
+      {%- if match.stingy %} · 유료 위주라 추천 목록에선 맨 뒤{% endif %}
+      {%- if match.predicted is not none %} · 내 평가 반영 (평가 전 예측 {{ match.predicted }}){% endif %}</p>
+  </div>
+{%- elif authed %}
+  <p class="field__hint">평가를 하나 이상 남기면 이 작품의 추천도(0~100)를 보여 드려요.</p>
+{%- endif %}
+</div>

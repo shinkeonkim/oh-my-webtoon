@@ -25,8 +25,7 @@
     <p class="card__meta">{{ (comic.authors + [comic.genre, comic.status]) | select | join(' · ') }}</p>
     <div class="card__badges">
       {#- 추천도(0~100): 로그인했고 취향이 있을 때만. 색 기준은 상세 화면과 같다 (app.match_tone) -#}
-      {%- set match_pct = match_of(comic.product_no) if match_of is defined else none %}
-      {%- if match_pct is not none %}<span class="badge badge--match-{{ match_tone(match_pct) }}" title="추천도 {{ match_pct }} / 100 — {{ MATCH_TONE_LABELS[match_tone(match_pct)] }}">추천도 {{ match_pct }}</span>{% endif %}
+      {%- if match_of is defined %}{{ ui.match_badge(comic.product_no, match_of(comic.product_no)) }}{% endif %}
       {{ ui.badge(free_label(comic), free_tone(comic)) }}
       {%- if comic.total_episodes %}{{ ui.badge(episodes_label(comic)) }}{% endif %}
       {%- if comic.naver_rating %}{{ ui.badge('%.1f' % comic.naver_rating, icon_name='star') }}{% endif %}

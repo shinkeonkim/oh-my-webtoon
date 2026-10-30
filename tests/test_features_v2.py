@@ -1,5 +1,6 @@
 """빠른 평가 · 관심 없음 · 소식(변경 기록) · 이어 보기 · 취향 · 필터 · 운영 · 수집 우선순위 · 스냅숏."""
 
+import re
 from datetime import UTC, datetime, timedelta
 
 from my_webtoon import backup, db
@@ -269,7 +270,35 @@ def test_match_score_on_detail(client, library):
     murim = _match(page)
     romance = _match(client.get("/comic/6").text)
     assert murim > romance  # 무협을 좋아하면 무협 작품 추천도가 더 높다
-    assert "이 작품 평가는 빼고 계산" in client.get("/comic/1").text
+    assert "내 평가 반영 (평가 전 예측" in client.get("/comic/1").text
+
+
+def test_own_rating_moves_own_match_score(client, library):
+    """평점을 올리면 그 작품의 추천도도 오르고, 내리면 내려간다 (예전엔 자기 평가를 빼고 계산해서 그대로였다)."""
+    client.post("/reviews/5", data={"score": "10"}, headers=HX)  # 다른 취향 하나는 깔아 둔다
+    percents = {}
+    for score in ("10", "6", "1"):
+        client.post("/reviews/1", data={"score": score}, headers=HX)
+        percents[score] = _match(client.get("/comic/1").text)
+    assert percents["10"] > percents["6"] > percents["1"]
+
+
+def test_saving_review_refreshes_match_without_reload(client, library):
+    """HTMX 저장 응답에 바뀐 추천도가 hx-swap-oob 로 실려 온다 — 카드 배지, 상세 화면이면 상자까지."""
+    client.post("/reviews/5", data={"score": "10"}, headers=HX)
+    on_list = client.post(
+        "/reviews/1", data={"score": "10"},
+        headers={**HX, "HX-Current-URL": "http://testserver/rate"},
+    ).text  # fmt: skip
+    assert 'id="match-1"' in on_list and 'hx-swap-oob="true"' in on_list
+    assert 'id="match-box"' not in on_list  # 목록 화면엔 상자가 없다
+    high = _match(client.get("/comic/1").text)
+    on_detail = client.post(
+        "/reviews/1", data={"score": "1"},
+        headers={**HX, "HX-Current-URL": "http://testserver/comic/1"},
+    ).text  # fmt: skip
+    assert '<div id="match-box" hx-swap-oob="true">' in on_detail
+    assert _match(on_detail) < high == int(re.search(r"추천도 (\d+)</span>", on_list).group(1))
 
 
 def test_match_percents_equal_detail_match_score(library):
@@ -301,8 +330,6 @@ def test_match_tone_and_card_badge(client, library):
 
 
 def _match(html: str) -> int:
-    import re
-
     return int(re.search(r'class="match__value">(\d+)<', html).group(1))
 
 

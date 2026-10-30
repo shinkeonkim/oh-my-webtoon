@@ -18,18 +18,7 @@
     </div>
     {% if comic.tags %}<p class="detail__tags">{% for t in comic.tags %}<span>#{{ t }}</span>{% endfor %}</p>{% endif %}
     <p class="detail__synopsis">{{ comic.synopsis }}</p>
-    {% if match %}
-    {%- set tone = match_tone(match.percent) %}
-    <div class="match match--{{ tone }}" title="최종 점수(취향 유사도 × 무료·회차·평점 보정)가 전체 {{ match.total }}개 중 몇 위인지를 0~100으로">
-      <div class="match__head"><span class="match__label">추천도</span><b class="match__value">{{ match.percent }}</b><span class="muted small">/ 100 · {{ match.total }}개 중 {{ match.rank }}위</span><span class="match__tone">{{ MATCH_TONE_LABELS[tone] }}</span></div>
-      {{ ui.progress(match.percent, '추천도') }}
-      <p class="match__detail">취향 일치 {{ match.taste_percent }} · 보정 ×{{ '%.2f' % match.boost }}
-        {%- if match.stingy %} · 유료 위주라 추천 목록에선 맨 뒤{% endif %}
-        {%- if match.left_out %} · 이 작품 평가는 빼고 계산{% endif %}</p>
-    </div>
-    {% elif authed %}
-    <p class="field__hint">평가를 하나 이상 남기면 이 작품의 추천도(0~100)를 보여 드려요.</p>
-    {% endif %}
+    {% set oob = false %}{% include "_match_box.html" %}
     <p class="card__math">보정 배수 {{ '%.2f' % boost }}{{ ' · 유료 위주 작품' if stingy }} · {{ comic.crawled_at | kst('%Y-%m-%d %H:%M') }} 수집</p>
     {% if authed %}<div class="detail__review">{% set editable = true %}{% set show_memo = true %}{% include "_review.html" %}</div>{% endif %}
     <p class="row">{{ ui.button('네이버 시리즈에서 보기', 'primary', href=series_link(request, comic), attrs=('' if is_mobile(request) else 'target="_blank" rel="noopener"'), icon_name='external') }}</p>

@@ -39,12 +39,13 @@ from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import QueryParams
 from starlette.middleware.sessions import SessionMiddleware
 
 from .. import backup, db, demo, taste
@@ -255,7 +256,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             nonlocal cache
             if cache is None:
                 with db.session(settings.database_path) as conn:
-                    cache = engine.match_percents(conn, user_id, options_from_query(request))
+                    cache = engine.match_percents(conn, user_id, page_options(request))
             return cache.get(product_no)
 
         return match_of
@@ -682,6 +683,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         review = db.get_review(conn, me(request).id, comic.product_no)
         return render(request, template, comic=comic, review=review, editable=True, show_memo=True)
 
+    def review_saved(request: Request, conn, comic):
+        """평가를 바꾼 HTMX 응답: 위젯과 함께 이 작품의 추천도(카드 배지, 상세 화면이면 상자)도 새 값으로."""
+        conn.commit()  # 추천도는 다른 연결에서도 읽는다(match_of) — 커밋해야 방금 평가가 보인다
+        user = me(request)
+        detail = (
+            urlsplit(request.headers.get("HX-Current-URL", "")).path == f"/comic/{comic.product_no}"
+        )
+        match = (
+            engine.match_score(conn, user.id, comic.product_no, page_options(request))
+            if detail
+            else None
+        )
+        review = db.get_review(conn, user.id, comic.product_no)
+        return render(
+            request, "_review_saved.html",
+            comic=comic, review=review, editable=True, show_memo=True, detail=detail, match=match,
+        )  # fmt: skip
+
     def comic_or_404(conn, product_no: int):
         comic = db.get_comic(conn, product_no)
         if comic is None:
@@ -700,7 +719,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
         if not request.headers.get("HX-Request"):
             return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
-        return review_widget(request, conn, comic)
+        return review_saved(request, conn, comic)
 
     @app.get("/reviews/{product_no}/edit", response_class=HTMLResponse)
     def edit_review(request: Request, product_no: int, conn=Depends(get_conn)):
@@ -716,7 +735,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.delete_review(conn, me(request).id, product_no)
         if not request.headers.get("HX-Request"):
             return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
-        return review_widget(request, conn, comic)
+        return review_saved(request, conn, comic)
 
     @app.post("/reviews/{product_no}/dismiss")
     def dismiss(request: Request, product_no: int, conn=Depends(get_conn)):
@@ -976,9 +995,21 @@ def parse_review_form(form, current: db.Review | None) -> dict:
     return changes
 
 
+def page_options(request: Request) -> ScoringOptions:
+    """지금 보고 있는 화면의 점수 공식. HTMX 로 평가를 저장하는 POST 는 주소에 쿼리가 없으니
+    브라우저 주소(HX-Current-URL)의 쿼리를 쓴다 — 화면에 보이는 추천도와 같은 공식으로 다시 계산하려고."""
+    current = request.headers.get("HX-Current-URL")
+    if request.method == "POST" and current:
+        return options_from_params(QueryParams(urlsplit(current).query))
+    return options_from_query(request)
+
+
 def options_from_query(request: Request) -> ScoringOptions:
     """URL 쿼리(?free_weight=1.5&sink=0 ...)로 점수 공식을 바꿔 볼 수 있게 한다."""
-    q = request.query_params
+    return options_from_params(request.query_params)
+
+
+def options_from_params(q) -> ScoringOptions:
     d = ScoringOptions()
 
     def num(name: str, default: float) -> float:

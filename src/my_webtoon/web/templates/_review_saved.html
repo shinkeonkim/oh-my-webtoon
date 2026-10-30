@@ -1,0 +1,6 @@
+{#- 평가 저장·삭제의 HTMX 응답: 위젯 + 바뀐 추천도. hx-swap-oob 조각은 HTMX 가 떼어 내 같은 id 자리에 넣는다.
+    카드 배지(#match-N)와 작품 상세 상자(#match-box). 다른 작품들의 추천도도 바뀌지만 그건 다음 새로고침에. -#}
+{% import "_ui.html" as ui %}
+{% include "_review.html" %}
+{{ ui.match_badge(comic.product_no, match_of(comic.product_no), oob=True) }}
+{%- if detail %}{% set oob = true %}{% include "_match_box.html" %}{% endif %}

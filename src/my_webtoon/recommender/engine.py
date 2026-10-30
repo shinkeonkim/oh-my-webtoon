@@ -64,6 +64,11 @@ class Recommendation:
     variants: int = 0  # 같은 작품의 다른 판본 수 (works.py) — 이 판본만 대표로 보여 준다
 
 
+def _percentile(pool: np.ndarray, value: float) -> int:
+    """pool 중 value 보다 낮은 비율 × 100, 내림 — 100 은 진짜 1등만 (7위가 반올림으로 100 이 되지 않게)."""
+    return math.floor(100 * float((pool < value).sum()) / max(1, len(pool) - 1))
+
+
 class Engine:
     def __init__(
         self,
@@ -226,14 +231,17 @@ class Engine:
 
             추천도 = 최종 점수가 이 작품보다 낮은 작품 비율 × 100   (100 = 1등, 50 = 딱 중간)
 
-        유사도 자체(0.1~0.5 정도)는 크기가 직관적이지 않아서 백분위로 바꿨다. 평가한 작품이면 그 평가를 빼고
-        계산한다 — "내 다른 평가만으로도 추천됐을까". 취향이 아직 없으면 None.
+        유사도 자체(0.1~0.5 정도)는 크기가 직관적이지 않아서 백분위로 바꿨다. 취향이 아직 없으면 None.
+
+        평가한 작품이면 **그 평가까지 넣은 취향**으로 계산한다 — 10점을 주면 올라가고 2점을 주면 내려가야
+        평점과 어긋나 보이지 않는다. 예전에는 그 평가를 빼고 계산해서("평가가 없었어도 추천됐을까")
+        평점을 바꿔도 이 숫자가 그대로였다. 그 값은 predicted 로 따로 준다.
         """
         features = self._load(conn)
         if features is None or product_no not in features.index:
             return None
         reviews = db.all_reviews(conn, user_id)
-        sims = taste_similarities(features, reviews, self.profile_opts)
+        sims = taste_similarities(features, reviews, self.profile_opts, leave_one_out=False)
         if sims is None:
             return None
         scores = self._scores_for(features, opts)
@@ -242,17 +250,20 @@ class Engine:
         finals = sims * boosts
         row = features.index[product_no]
         pool_finals, pool_sims = finals[keep], sims[keep]
-        n = max(1, len(pool_finals) - 1)
+        predicted = None
+        if product_no in reviews:  # 이 평가를 빼고 계산했다면 — "평가 없이도 추천됐을까"
+            loo = taste_similarities(features, reviews, self.profile_opts) * boosts
+            predicted = _percentile(loo[keep], loo[row])
         return {
-            # 내림: 100 은 진짜 1등만 (7위가 반올림으로 100 이 되지 않게)
-            "percent": math.floor(100 * float((pool_finals < finals[row]).sum()) / n),
-            "taste_percent": math.floor(100 * float((pool_sims < sims[row]).sum()) / n),
+            "percent": _percentile(pool_finals, finals[row]),
+            "taste_percent": _percentile(pool_sims, sims[row]),
             "rank": int((pool_finals > finals[row]).sum()) + 1,
             "total": len(pool_finals),
             "similarity": float(sims[row]),
             "boost": float(boosts[row]),
             "stingy": scoring.is_stingy(self._comics[product_no], opts),
-            "left_out": product_no in reviews,
+            "rated": product_no in reviews,
+            "predicted": predicted,
         }
 
     def match_percents(
@@ -266,7 +277,8 @@ class Engine:
         features = self._load(conn)
         if features is None:
             return {}
-        sims = taste_similarities(features, db.all_reviews(conn, user_id), self.profile_opts)
+        reviews = db.all_reviews(conn, user_id)
+        sims = taste_similarities(features, reviews, self.profile_opts, leave_one_out=False)
         if sims is None:
             return {}
         scores = self._scores_for(features, opts)
