@@ -1,5 +1,6 @@
-{#- 빠른 평가 한 장 = 폼 하나. 별점·상태·본 화수를 마음껏 고른 뒤 '저장하고 다음'을 눌러야 저장된다.
-    응답으로 다음 장이 오면 이 조각 전체(#quick)를 바꾼다. done: 이번에 넘긴 장 수, last: 방금 넘긴 작품(되돌리기용) -#}
+{#- 빠른 평가 한 장 = 폼 하나. 별점을 고른 뒤 '저장하고 다음', 아니면 '보류'.
+    응답으로 다음 장이 오면 이 조각 전체(#quick)를 바꾼다. done: 이번에 넘긴 장 수, last: 방금 넘긴 작품(되돌리기용),
+    explore: 취향 밖에서 섞어 넣은 장인지 (engine.quick_next) -#}
 {% import "_ui.html" as ui %}
 <section id="quick" class="quick">
   <p class="quick__progress muted small">
@@ -16,6 +17,7 @@
       {%- if comic.thumbnail_url %}<img src="{{ comic.thumbnail_url }}" alt="" referrerpolicy="no-referrer">{% endif %}
     </a>
     <div class="quick__body">
+      {%- if explore %}<p class="quick__explore">{{ ui.badge('다른 취향도 섞어 볼게요 · ' ~ comic.genre, 'promo', icon_name='sparkle') }}</p>{% endif %}
       <h2 class="quick__title">{{ comic.title }}</h2>
       <p class="card__meta">{{ (comic.authors + [comic.genre, comic.status]) | select | join(' · ') }}</p>
       <div class="card__badges">
@@ -28,14 +30,9 @@
     <div class="quick__answer">
       {% if error %}<p class="alert alert--error m-0">{{ error }}</p>{% endif %}
       {% call ui.field('별점') %}{{ ui.star_radio('score') }}{% endcall %}
-      {% call ui.field('상태', '별점만 고르면 봤음으로 저장해요') %}{{ ui.chip_radio('status', [('seen', '봤음'), ('watching', '보는 중'), ('dropped', '하차'), ('wish', '보고 싶음')]) }}{% endcall %}
-      {% call ui.field('본 ' ~ comic.unit ~ '수 (선택)') %}<input class="input quick__episodes" type="number" name="episodes_read" min="0" inputmode="numeric" placeholder="{{ comic.total_episodes or '' }}">{% endcall %}
       {{ ui.button('저장하고 다음', 'primary', attrs='name="action" value="save"') }}
-      <div class="quick__buttons">
-        {{ ui.button('안 봤음 · 넘기기', 'secondary', attrs='name="action" value="skip"') }}
-        {{ ui.button('관심 없음', 'ghost', attrs='name="action" value="dismissed"') }}
-      </div>
-      <p class="field__hint">'안 봤음'은 취향에 반영하지 않고, {{ skip_days }}일 동안만 다시 묻지 않아요. 그 사이 봤다면 평가에서 찾아 남기면 돼요.</p>
+      {{ ui.button('보류 · 넘기기', 'secondary', attrs='name="action" value="skip"') }}
+      <p class="field__hint">'보류'는 취향에 반영하지 않고, {{ skip_days }}일 동안만 다시 묻지 않아요. 상태·본 화수는 작품 화면에서 남길 수 있어요.</p>
     </div>
   </form>
   {% else %}

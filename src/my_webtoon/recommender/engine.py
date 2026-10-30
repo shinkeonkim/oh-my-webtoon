@@ -23,6 +23,7 @@ import secrets
 import sqlite3
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -38,6 +39,8 @@ from .works import work_keys
 
 SNAPSHOT_TTL = timedelta(minutes=30)
 DIVERSITY_WINDOW = 150  # 다양화(MMR)는 앞쪽 이만큼만 다시 줄 세운다 — 뒤쪽은 어차피 잘 안 본다
+EXPLORE_EVERY = 4  # 빠른 평가에서 이 장마다 한 번은 덜 평가한 장르의 작품 (quick_next)
+EXPLORE_GENRES = 5  # 그 '덜 평가한 장르'를 몇 개까지 돌아가며 고를지
 REFRESH_INTERVAL = 600  # 초. invalidate 없이 작품 데이터만 바뀌었을 때 다시 만드는 최소 간격
 
 log = logging.getLogger(__name__)
@@ -340,8 +343,29 @@ class Engine:
             우선순위 = log(1 + 다운로드 수) × (1 + 2 × 취향 유사도)
 
         다운로드가 많을수록 봤을 확률이 높고, 취향과 비슷할수록 봤거나 볼 작품일 확률이 높다.
-        이미 평가했거나 '안 봤음'으로 넘긴 작품(판본 포함)은 빼고, 성인 작품도 뺀다.
+        이미 평가했거나 '보류'로 넘긴 작품(판본 포함)은 빼고, 성인 작품도 뺀다.
         """
+        return self._quick_candidates(conn, user_id)[:limit]
+
+    def quick_next(
+        self, conn: sqlite3.Connection, user_id: int, done: int
+    ) -> tuple[Comic | None, bool]:
+        """빠른 평가의 다음 한 장 (작품, 탐색 카드인지). done = 이번에 넘긴 장 수.
+
+        quick_queue 순서만 따르면 평가할수록 취향 쪽으로만 좁아진다 — 무협을 몇 개 평가하면 계속 무협.
+        그래서 EXPLORE_EVERY 장마다 한 번은 '내가 가장 덜 평가한 장르' 중 하나에서 가장 많이 본 작품을 낸다.
+        장르는 덜 평가한 순으로 EXPLORE_GENRES 개를 돌아가며 고른다 (매번 같은 장르만 나오지 않게).
+        """
+        candidates = self._quick_candidates(conn, user_id)
+        if not candidates:
+            return None, False
+        if (done + 1) % EXPLORE_EVERY == 0:
+            pick = self._explore_pick(candidates, db.all_reviews(conn, user_id), done)
+            if pick is not None:
+                return pick, True
+        return candidates[0], False
+
+    def _quick_candidates(self, conn: sqlite3.Connection, user_id: int) -> list[Comic]:
         features = self._load(conn)
         if features is None:
             return []
@@ -363,7 +387,21 @@ class Engine:
                 (math.log1p(comic.popularity or 0) * (1 + 2 * max(0.0, sims[row])), comic)
             )
         scored.sort(key=lambda sc: -sc[0])
-        return self._one_per_work([c for _, c in scored])[:limit]
+        return self._one_per_work([c for _, c in scored])
+
+    def _explore_pick(
+        self, candidates: list[Comic], reviews: dict[int, Review], done: int
+    ) -> Comic | None:
+        mine = Counter(self._comics[no].genre for no in reviews if no in self._comics)
+        available = Counter(c.genre for c in candidates if c.genre)
+        # 남은 작품이 몇 개는 있는 장르 중, 내 평가가 적은 순 (같으면 작품이 많은 장르부터)
+        genres = sorted(
+            (g for g, n in available.items() if n >= 3), key=lambda g: (mine[g], -available[g])
+        )[:EXPLORE_GENRES]
+        if not genres:
+            return None
+        genre = genres[(done // EXPLORE_EVERY) % len(genres)]
+        return max((c for c in candidates if c.genre == genre), key=lambda c: c.popularity or 0)
 
     # -- 스냅숏 (무한 스크롤) -----------------------------------------------------
 

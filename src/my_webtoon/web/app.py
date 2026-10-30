@@ -322,20 +322,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # 한 번에 한 작품만. 누르면 저장하고 바로 다음 작품 조각을 돌려준다 (HTMX 가 #quick 을 통째로 바꾼다).
     # 목표는 평가 개수를 빨리 늘리는 것 — 평가가 많을수록 추천이 정확해진다 (docs/03).
 
-    # 카드 하나가 폼이다. 별점·상태·본 화수를 고르는 동안은 아무것도 저장하지 않고, 버튼을 눌러야 저장하고 넘어간다.
-    #   save       고른 값 저장 (별점만 골랐으면 상태는 '봤음')
-    #   skip       안 봤음 — 평가 아님, db.QUICK_SKIP_DAYS 동안만 다시 묻지 않는다 (quick_skips)
-    #   dismissed  관심 없음
+    # 카드 하나가 폼이다. 별점을 고르는 동안은 저장하지 않고, 버튼을 눌러야 저장하고 넘어간다.
+    # 쓰는 경우는 둘뿐이라 상태·본 화수·관심 없음은 뺐다 (작품 화면에서 남기면 된다).
+    #   save  별점 저장 (상태는 '봤음')
+    #   skip  보류 — 평가 아님, db.QUICK_SKIP_DAYS 동안만 다시 묻지 않는다 (quick_skips)
+    # 몇 장마다 한 번은 덜 평가한 장르의 작품이 섞여 나온다 (engine.quick_next).
 
     def quick_card(request: Request, conn, done: int = 0, last=None, comic=None, error=""):
         user = me(request)
+        explore = False
         if comic is None:
-            queue = engine.quick_queue(conn, user.id, limit=1)
-            comic = queue[0] if queue else None
+            comic, explore = engine.quick_next(conn, user.id, done)
         return render(
             request,
             "_quick.html" if request.headers.get("HX-Request") else "quick.html",
             comic=comic,
+            explore=explore,
             done=done,
             last=last,
             error=error,
@@ -353,23 +355,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         comic = comic_or_404(conn, product_no)
         form = await request.form()
         action, done = form.get("action", ""), int(form.get("done") or 0)
-        if action == "save":
-            score, status = _opt_int(form.get("score")), form.get("status") or None
-            episodes = _opt_int(form.get("episodes_read"))
-            if score is None and status is None:
-                return quick_card(
-                    request, conn, done, comic=comic, error="별점이나 상태를 하나는 골라 주세요"
-                )
+        if action == "save":  # 별점만 — 상태는 '봤음'으로 둔다 (자세한 건 작품 화면에서)
+            score = _opt_int(form.get("score"))
+            if score is None:
+                return quick_card(request, conn, done, comic=comic, error="별점을 골라 주세요")
             try:
-                db.update_review(
-                    conn, user.id, product_no,
-                    score=score, status=status or "seen", episodes_read=episodes,
-                )  # fmt: skip
+                db.update_review(conn, user.id, product_no, score=score, status="seen")
             except ValueError as exc:
                 return quick_card(request, conn, done, comic=comic, error=str(exc))
-        elif action == "dismissed":
-            db.update_review(conn, user.id, product_no, status="dismissed")
-        elif action == "skip":
+        elif action == "skip":  # 보류: 평가 아님, QUICK_SKIP_DAYS 동안 다시 묻지 않는다
             db.set_quick_skip(conn, user.id, product_no, True)
         else:
             raise HTTPException(400, f"모르는 동작: {action}")

@@ -494,11 +494,10 @@ footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); pa
 .quick__cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .quick__body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .quick__title { margin: 0; font-size: var(--text-xl); }
+.quick__explore { margin: 0; }
 .quick__synopsis { color: var(--text-2); font-size: var(--text-sm); }
 .quick__answer { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-3); border-top: 1px solid var(--line); padding-top: var(--space-4); }
 .quick__answer > .btn { height: 48px; font-size: var(--text-md); }
-.quick__episodes { max-width: 140px; }
-.quick__buttons { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
 .quick.htmx-request .quick__card { opacity: .5; transition: opacity .15s; }
 .stars--lg .stars__half { width: 18px; height: 36px; }
 .stars--lg .stars__half .icon { width: 36px; height: 36px; }

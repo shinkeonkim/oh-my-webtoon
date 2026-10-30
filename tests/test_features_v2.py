@@ -12,39 +12,51 @@ from .test_web import HX, ME, review
 # -- 빠른 평가 -----------------------------------------------------------------
 
 
-def test_quick_rating_saves_all_fields_on_explicit_save(client, library):
+def test_quick_rating_is_score_or_hold(client, library):
+    """빠른 평가는 별점 저장 아니면 보류뿐 — 상태·본 화수·관심 없음 칸은 없다."""
     page = client.get("/quick").text
     assert "빠른 평가" in page and 'id="quick"' in page
+    assert 'name="status"' not in page and 'name="episodes_read"' not in page
+    assert 'value="dismissed"' not in page and "보류 · 넘기기" in page
 
     first = _quick_product(page)
-    data = {
-        "action": "save",
-        "score": "8",
-        "status": "watching",
-        "episodes_read": "12",
-        "done": "0",
-    }
-    resp = client.post(f"/quick/{first}", data=data, headers=HX)
+    resp = client.post(
+        f"/quick/{first}", data={"action": "save", "score": "8", "done": "0"}, headers=HX
+    )
     assert resp.status_code == 200 and "<html" not in resp.text  # 다음 장 조각만
     r = review(library, first)
-    assert (r.score, r.status, r.episodes_read) == (8, "watching", 12)  # 한 번에 여러 값
+    assert (r.score, r.status) == (8, "seen")  # 별점만 남기면 '봤음'
     assert _quick_product(resp.text) != first
     assert "이번에 1장" in resp.text and "되돌리기" in resp.text
 
 
-def test_quick_score_only_means_seen_and_empty_save_stays(client, library):
+def test_quick_save_without_score_stays(client, library):
     first = _quick_product(client.get("/quick").text)
     resp = client.post(
-        f"/quick/{first}",
-        data={"action": "save", "score": "", "status": "", "done": "0"},
-        headers=HX,
+        f"/quick/{first}", data={"action": "save", "score": "", "done": "0"}, headers=HX
     )
     assert (
-        "하나는 골라 주세요" in resp.text and _quick_product(resp.text) == first
+        "별점을 골라 주세요" in resp.text and _quick_product(resp.text) == first
     )  # 넘어가지 않는다
     assert review(library, first) is None
-    client.post(f"/quick/{first}", data={"action": "save", "score": "6", "status": ""}, headers=HX)
-    assert review(library, first).status == "seen"
+    gone = client.post(f"/quick/{first}", data={"action": "dismissed"}, headers=HX)
+    assert gone.status_code == 400  # 관심 없음은 빠른 평가에서 뺐다
+
+
+def test_quick_mixes_in_least_rated_genre(library):
+    """같은 장르만 평가해도 EXPLORE_EVERY 장마다 한 번은 덜 평가한 장르가 섞여 나온다."""
+    from my_webtoon.recommender.engine import EXPLORE_EVERY
+
+    with db.session(library) as conn:
+        for no in range(200, 210):  # 로맨스 후보를 넉넉히 (3개 이상인 장르만 탐색 대상)
+            db.upsert_comic(conn, comic_data(no, f"로맨스 {no}", genre="로맨스", popularity=no))
+        db.update_review(conn, ME, 1, score=10)
+        db.update_review(conn, ME, 2, score=9)  # 무협만 평가
+        engine = Engine()
+        normal, explore = engine.quick_next(conn, ME, done=0)
+        mixed, explored = engine.quick_next(conn, ME, done=EXPLORE_EVERY - 1)
+    assert not explore and normal.genre == "무협"  # 평소엔 취향 쪽(무협)부터
+    assert explored and mixed.genre != "무협"
 
 
 def test_quick_skip_is_not_a_review_and_undo_restores(client, library):
