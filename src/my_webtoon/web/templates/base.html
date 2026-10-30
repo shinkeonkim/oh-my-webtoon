@@ -56,6 +56,16 @@
         </div>
         {%- endfor %}
       </nav>
+      {#- 작품 검색. 치는 동안 자동완성(/search/suggest)이 뜨고 항목을 누르면 바로 상세로, Enter 는 전체 결과(/comics?q=) -#}
+      <form class="search" action="/comics" method="get" role="search">
+        {{ ui.icon('search', 16) }}
+        <input class="search__input" type="search" name="q" placeholder="작품·작가 검색" autocomplete="off" aria-label="작품 검색"
+               value="{{ request.query_params.get('q', '') if path in ('/comics', '/rate') else '' }}"
+               role="combobox" aria-expanded="false" aria-controls="search-suggest" aria-autocomplete="list"
+               hx-get="/search/suggest" hx-trigger="input changed delay:150ms, search" hx-target="#search-suggest" hx-sync="this:replace">
+        <kbd class="search__key" aria-hidden="true">/</kbd>
+        <div id="search-suggest" class="search__list" role="listbox"></div>
+      </form>
       <div class="topbar__user">
         {%- if authed %}
         <details class="usermenu">
@@ -63,6 +73,7 @@
           <div class="usermenu__panel">
             <a href="{{ my_page }}">내 평가 기록</a>
             <a href="/settings" class="{{ 'is-on' if path == '/settings' }}">설정</a>
+            <a href="/guide" class="{{ 'is-on' if path == '/guide' }}">사용 가이드</a>
             {#- 화면 테마 — JS 가 있으면 HTMX 로 쿠키만 바꾸고 바로 적용, 없으면 폼 제출 후 이 화면으로 돌아온다 -#}
             <form method="post" action="/theme" class="usermenu__theme" role="group" aria-label="화면 테마">
               <input type="hidden" name="next" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query }}">
@@ -101,7 +112,7 @@
     {% block content %}{% endblock %}
   </main>
   <footer>
-    데이터 출처 <a href="https://series.naver.com/comic/home.series" target="_blank" rel="noopener">네이버 시리즈</a> · 개인 학습용 추천기 · <a href="/ui">UI 컴포넌트</a>
+    데이터 출처 <a href="https://series.naver.com/comic/home.series" target="_blank" rel="noopener">네이버 시리즈</a> · 개인 학습용 추천기 · <a href="/guide">사용 가이드</a> · <a href="/ui">UI 컴포넌트</a>
   </footer>
   <script>
     // 화면 테마: <html data-theme> 를 바꾸면 style.css 의 토큰이 바뀐다. system 이면 속성을 지워 OS 설정을 따른다.
@@ -114,6 +125,38 @@
         b.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
     }
+    // 검색 자동완성: 결과가 오면 열고, ↓/↑ 로 항목 이동, Esc·바깥 클릭으로 닫는다. '/' 를 누르면 검색창으로.
+    (() => {
+      const input = document.querySelector('.search__input');
+      const list = document.getElementById('search-suggest');
+      if (!input || !list) return;
+      const items = () => [...list.querySelectorAll('.search__item')];
+      const setOpen = (open) => { list.classList.toggle('is-open', open); input.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+      const close = () => setOpen(false);
+      list.addEventListener('htmx:afterSwap', () => setOpen(list.children.length > 0 && input.value.trim() !== ''));
+      input.addEventListener('focus', () => { if (list.children.length && input.value.trim()) setOpen(true); });
+      input.addEventListener('input', () => { if (!input.value.trim()) { list.innerHTML = ''; close(); } });
+      const move = (from, step) => {
+        const all = items(); if (!all.length) return;
+        const i = all.indexOf(from);
+        if (i + step < 0) { input.focus(); return; }
+        all[Math.min(all.length - 1, i + step)].focus();
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' && list.classList.contains('is-open')) { e.preventDefault(); move(null, 1); }
+        if (e.key === 'Escape') close();
+      });
+      list.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); move(document.activeElement, 1); }
+        if (e.key === 'ArrowUp') { e.preventDefault(); move(document.activeElement, -1); }
+        if (e.key === 'Escape') { close(); input.focus(); }
+      });
+      document.addEventListener('click', (e) => { if (!e.target.closest('.search')) close(); });
+      document.addEventListener('keydown', (e) => {
+        const typing = e.target.closest('input, textarea, select, [contenteditable]');
+        if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); input.focus(); input.select(); }
+      });
+    })();
     // 내 메뉴: 바깥을 누르거나 Esc 를 누르면 닫는다 (<details> 는 기본으로는 다시 눌러야만 닫힌다)
     document.addEventListener('click', (e) => {
       document.querySelectorAll('details.usermenu[open]').forEach((d) => { if (!d.contains(e.target)) d.open = false; });

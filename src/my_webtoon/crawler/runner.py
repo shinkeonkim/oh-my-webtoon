@@ -54,8 +54,8 @@ def fetch_one(
     if page.status != 200:
         raise RuntimeError(f"HTTP {page.status}")
     data = parser.parse_detail(product_no, page.text)
-    if data["genre"] in excluded_genres:
-        raise parser.ExcludedGenre(data["genre"])
+    if reason := db.excluded_reason(data["genre"], data["title"], excluded_genres):
+        raise parser.ExcludedGenre(reason)
     return data, parser.extract_product_links(page.text, exclude=product_no)
 
 

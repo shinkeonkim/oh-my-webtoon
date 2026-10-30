@@ -53,11 +53,13 @@
 
 {#- 카드의 추천도 배지. 값이 없어도(취향이 아직 없음) 빈 자리를 남긴다 — 첫 평가 직후 hx-swap-oob 로 채우려고.
     색 기준은 상세 화면과 같다 (app.match_tone) -#}
-{% macro match_badge(no, percent, oob=False) -%}
+{% macro match_badge(no, percent, oob=False, anchored=True) -%}
+{#- anchored: id="match-N" 을 단다 (평가 직후 hx-swap-oob 로 바꿀 자리). 검색 자동완성처럼 바꿀 일 없는 곳은 False -#}
+{%- set id_attr = (' id="match-' ~ no ~ '"') if anchored else '' -%}
 {%- if percent is not none -%}
-<span id="match-{{ no }}" class="badge badge--match-{{ match_tone(percent) }}" title="추천도 {{ percent }} / 100 — {{ MATCH_TONE_LABELS[match_tone(percent)] }}"{% if oob %} hx-swap-oob="true"{% endif %}>추천도 {{ percent }}</span>
-{%- else -%}
-<span id="match-{{ no }}" hidden{% if oob %} hx-swap-oob="true"{% endif %}></span>
+<span{{ id_attr | safe }} class="badge badge--match-{{ match_tone(percent) }}" title="추천도 {{ percent }} / 100 — {{ MATCH_TONE_LABELS[match_tone(percent)] }}"{% if oob %} hx-swap-oob="true"{% endif %}>추천도 {{ percent }}</span>
+{%- elif anchored -%}
+<span{{ id_attr | safe }} hidden{% if oob %} hx-swap-oob="true"{% endif %}></span>
 {%- endif %}
 {%- endmacro %}
 

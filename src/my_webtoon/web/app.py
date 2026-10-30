@@ -24,6 +24,8 @@ HTMX 로 부분 교체한다 — 프론트엔드 빌드 도구 없이 파이썬 
     GET  /settings               비밀번호 변경, 평가 내보내기/가져오기, 👑 사용자 추가·백업
     GET  /crawl, POST /crawl/run 수집·운영 상태 (응답 시간 포함) / 👑 즉시 실행
     GET  /login, POST /login, POST /logout, GET /healthz   🔓
+    GET  /search/suggest?q=      🔓 위 메뉴 검색창의 자동완성 (작품 8개 조각, HTMX)
+    GET  /guide                  🔓 사용 가이드
     POST /theme                  🔓 화면 테마 (자동/라이트/다크) — 쿠키, 사용자 메뉴에서
 """
 
@@ -45,6 +47,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from starlette.datastructures import QueryParams
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -53,7 +56,7 @@ from ..config import Settings, load_settings
 from ..crawler import runner
 from ..recommender import Engine, ScoringOptions
 from ..recommender import scoring as scoring_mod
-from ..recommender.engine import REFRESH_INTERVAL
+from ..recommender.engine import EXPLORE_EVERY, REFRESH_INTERVAL
 from . import auth, prom
 from .metrics import RequestLog
 from .prom import Metrics
@@ -64,8 +67,9 @@ ALWAYS_PUBLIC = ("/login", "/demo", "/static", "/healthz", "/readyz", "/theme")
 # 화면 테마. DB 가 아니라 쿠키에 둔다 — 로그인 전 화면에도 쓰고, 기기마다(폰은 다크·PC 는 라이트) 다를 수 있으니까.
 # system 이면 OS 설정(prefers-color-scheme)을 따른다. 서버가 <html data-theme> 으로 그려서 깜빡임이 없다.
 THEMES = ("system", "light", "dark")
+SUGGEST_LIMIT = 8  # 검색 자동완성에 보여 줄 작품 수
 THEME_COOKIE = "theme"
-PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui")  # 읽기 전용 공개 화면
+PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui", "/search", "/guide")  # 읽기 전용 공개 화면
 NEWS_DAYS = 30  # 소식 화면이 보여 주는 기간
 REVIEWED_FILTERS = {
     "exclude": "안 본 것만",
@@ -172,6 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     templates.env.filters.update(
         kst=kst,
+        highlight=highlight,
         star_option=lambda v: (v, f"★{format_stars(v)}"),  # 셀렉트용 (값, 라벨)
         pair=lambda v: (v, v),
         sort_option=lambda item: (item[0], item[1][0]),
@@ -911,6 +916,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.session.clear()
         return RedirectResponse("/comics", status_code=303)
 
+    @app.get("/search/suggest", response_class=HTMLResponse)
+    def search_suggest(request: Request, q: str = "", conn=Depends(get_conn)):
+        """위 메뉴 검색창 자동완성. 글자를 칠 때마다(HTMX, 잠깐 멈추면) 작품 몇 개를 돌려준다 — 누르면 바로 상세로."""
+        q = q.strip()
+        comics = db.search_comics(conn, q, limit=SUGGEST_LIMIT) if q else []
+        return render(request, "_suggest.html", q=q, comics=comics)
+
+    @app.get("/guide", response_class=HTMLResponse)
+    def guide(request: Request):
+        return render(
+            request, "guide.html",
+            settings=settings, skip_days=db.QUICK_SKIP_DAYS, explore_every=EXPLORE_EVERY,
+            news_days=NEWS_DAYS, tones=[(t, MATCH_TONE_LABELS[t], r) for t, r in MATCH_TONE_RANGES],
+        )  # fmt: skip
+
     @app.post("/theme")
     async def set_theme(request: Request):
         """HTMX 면 쿠키만 바꾼다(화면은 base.html 의 스크립트가 바로 바꾼다). JS 가 없으면 보던 화면으로 돌아간다."""
@@ -1057,6 +1077,21 @@ def parse_product_no(text: str) -> int | None:
 MOBILE_UA = re.compile(r"Android|iPhone|iPad|iPod|Mobile")
 
 
+def highlight(text: str, query: str) -> Markup:
+    """검색 자동완성: text 안의 query 를 <mark> 로 (대소문자 무시, 첫 번째만). 못 찾으면 그대로."""
+    i = text.lower().find(query.lower()) if query else -1
+    if i < 0:
+        return Markup.escape(text)
+    j = i + len(query)
+    return (
+        Markup.escape(text[:i])
+        + Markup("<mark>")
+        + Markup.escape(text[i:j])
+        + Markup("</mark>")
+        + Markup.escape(text[j:])
+    )
+
+
 def match_tone(percent: int) -> str:
     """추천도 구간 → 색 (style.css 의 .match--* / .badge--match-*). 상세 화면과 목록 카드가 같은 기준을 쓴다.
 
@@ -1072,6 +1107,12 @@ def match_tone(percent: int) -> str:
 
 
 MATCH_TONE_LABELS = {"top": "강력 추천", "high": "추천", "mid": "보통", "low": "취향 밖"}
+MATCH_TONE_RANGES = [
+    ("top", "90~100"),
+    ("high", "70~89"),
+    ("mid", "40~69"),
+    ("low", "0~39"),
+]  # 가이드용
 
 
 def theme_of(request: Request) -> str:

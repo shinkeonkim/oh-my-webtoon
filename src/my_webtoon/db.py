@@ -97,6 +97,11 @@ class Comic:
     free_gain: int = 0  # 최근 RECENT_DAYS 일 동안 무료 회차가 늘어난 만큼 (comic_changes)
 
     @property
+    def is_volume(self) -> bool:
+        """단행본(권 단위) 판본인가 — 수집·저장은 하지만 화면에는 내지 않는다 (SHOWN_SQL 과 같은 기준)."""
+        return self.unit == "권" or "[단행본]" in self.title
+
+    @property
     def url(self) -> str:
         return f"https://series.naver.com/comic/detail.series?productNo={self.product_no}"
 
@@ -127,6 +132,10 @@ class Comic:
 
 
 RECENT_DAYS = 14  # '무료 +N' 배지를 이 기간 동안 붙인다
+
+# 화면에 내는 작품: 단행본(권 단위) 판본은 뺀다. 수집·변경 기록·평가는 그대로 남고, 예전에 단행본에 남긴 평가도
+# 취향에는 계속 들어간다 — 추천·검색·목록·소식 같은 '찾는' 화면에서만 안 보인다 (Comic.is_volume 과 같은 기준).
+SHOWN_SQL = "(c.unit != '권' AND c.title NOT LIKE '%[단행본]%')"
 
 _COMIC_SELECT = f"""
     SELECT c.*, p.label AS promo_label, g.free_gain
@@ -204,6 +213,23 @@ def upsert_comic(conn: sqlite3.Connection, data: dict) -> list[str]:
 EXCLUDED_GENRE_PREFIX = "제외 장르:"
 
 
+def excluded_reason(genre: str | None, title: str, excluded: frozenset[str]) -> str | None:
+    """수집하지 않을 작품이면 그 이유(설정 값 그대로: 'BL' 또는 '[GL]'), 아니면 None.
+
+    설정에는 두 종류가 섞여 있다 (config.excluded_genres):
+      'BL'    네이버 장르가 정확히 이것
+      '[GL]'  제목에 [GL] 꼬리표 — 장르는 '로맨스' 등으로 달려 있어 장르로는 안 걸러지는 작품. 대소문자·괄호 안 공백 무시
+    """
+    if genre in excluded:
+        return genre
+    for item in excluded:
+        if item.startswith("[") and item.endswith("]"):
+            tag = re.escape(item[1:-1].strip())
+            if re.search(rf"\[\s*{tag}\s*\]", title, re.IGNORECASE):
+                return item
+    return None
+
+
 def delete_comic(conn: sqlite3.Connection, product_no: int) -> None:
     conn.execute("DELETE FROM reviews WHERE product_no = ?", (product_no,))
     conn.execute("DELETE FROM comic_changes WHERE product_no = ?", (product_no,))
@@ -214,19 +240,19 @@ def delete_comic(conn: sqlite3.Connection, product_no: int) -> None:
 def apply_genre_exclusion(conn: sqlite3.Connection, excluded: frozenset[str]) -> tuple[int, int]:
     """EXCLUDED_GENRES 설정을 DB 에 맞춘다. 앱/CLI 가 시작할 때 부른다 (몇 번 불러도 같다).
 
-    - 제외 장르 작품: 작품·평가·무료 이벤트를 지우고, 큐에는 'skipped / 제외 장르:BL' 로 남긴다
+    - 제외 장르 작품(제목 꼬리표 '[GL]' 포함 — excluded_reason): 작품·평가·무료 이벤트를 지우고,
+      큐에는 'skipped / 제외 장르:BL' 로 남긴다
       → 다시 수집하지 않는다.
     - 플래그에서 빠진 장르: 그 이유로 건너뛰었던 큐 항목을 pending 으로 되돌린다 → 다음 수집에서 다시 가져온다.
     (삭제된 개수, 되살린 개수) 를 돌려준다.
     """
     removed = 0
-    for genre in excluded:
-        rows = conn.execute("SELECT product_no FROM comics WHERE genre = ?", (genre,)).fetchall()
-        for (no,) in rows:
+    for no, genre, title in conn.execute("SELECT product_no, genre, title FROM comics").fetchall():
+        if reason := excluded_reason(genre, title, excluded):
             delete_comic(conn, no)
             enqueue(conn, [no], None)
-            mark_crawled(conn, no, "skipped", f"{EXCLUDED_GENRE_PREFIX}{genre}")
-        removed += len(rows)
+            mark_crawled(conn, no, "skipped", f"{EXCLUDED_GENRE_PREFIX}{reason}")
+            removed += 1
 
     restored = 0
     rows = conn.execute(
@@ -255,16 +281,19 @@ def all_comics(conn: sqlite3.Connection) -> list[Comic]:
 
 
 def search_comics(conn: sqlite3.Connection, query: str, limit: int = 40) -> list[Comic]:
-    """제목/작가 부분 일치 검색. 몇 천 건 규모라 LIKE 로 충분하다."""
-    like = f"%{query.strip()}%"
+    """제목/작가 부분 일치 검색. 몇 천 건 규모라 LIKE 로 충분하다.
+    제목은 띄어쓰기를 무시하고도 찾는다 — '나혼자' 로 '나 혼자만 레벨업' 이 나오게.
+    순서: 제목이 똑같은 것 → 제목이 검색어로 시작하는 것 → 인기순."""
+    q = query.strip()
+    like, compact = f"%{q}%", f"%{q.replace(' ', '')}%"
     rows = conn.execute(
         _COMIC_SELECT
-        + """
-        WHERE c.title LIKE ? OR c.authors LIKE ?
-        ORDER BY (c.title = ?) DESC, c.popularity DESC NULLS LAST
+        + f"""
+        WHERE (c.title LIKE ? OR c.authors LIKE ? OR REPLACE(c.title, ' ', '') LIKE ?) AND {SHOWN_SQL}
+        ORDER BY (c.title = ?) DESC, (c.title LIKE ?) DESC, c.popularity DESC NULLS LAST
         LIMIT ?
         """,
-        (like, like, query.strip(), limit),
+        (like, like, compact, q, f"{q}%", limit),
     ).fetchall()
     return [Comic.from_row(r) for r in rows]
 
@@ -291,10 +320,11 @@ def _comic_filters(
     query: str = "", genre: str = "", free: str = "", status: str = ""
 ) -> tuple[list, list]:
     """목록 화면의 공통 조건 (WHERE 조각들, 파라미터). list_comics 와 review_status_counts 가 같이 쓴다."""
-    where, params = [], []
+    where, params = [SHOWN_SQL], []
     if query.strip():
-        where.append("(c.title LIKE ? OR c.authors LIKE ?)")
-        params += [f"%{query.strip()}%"] * 2
+        # 제목은 띄어쓰기를 무시하고도 찾는다 (search_comics 와 같은 규칙)
+        where.append("(c.title LIKE ? OR c.authors LIKE ? OR REPLACE(c.title, ' ', '') LIKE ?)")
+        params += [f"%{query.strip()}%"] * 2 + [f"%{query.strip().replace(' ', '')}%"]
     if genre:
         where.append("c.genre = ?")
         params.append(genre)
@@ -347,7 +377,8 @@ def list_comics(
     order = COMIC_SORTS.get(sort, COMIC_SORTS["popular"])[1]
     order_params: list = []
     if sort == "search":  # 검색: 제목이 딱 맞는 작품을 맨 앞에
-        order, order_params = "(c.title = ?) DESC, " + COMIC_SORTS["popular"][1], [query.strip()]
+        order = "(c.title = ?) DESC, (c.title LIKE ?) DESC, " + COMIC_SORTS["popular"][1]
+        order_params = [query.strip(), f"{query.strip()}%"]
     total = conn.execute(f"SELECT COUNT(*) FROM comics c{clause}", params).fetchone()[0]
     rows = conn.execute(
         _COMIC_SELECT + clause + f" ORDER BY {order} LIMIT ? OFFSET ?",
@@ -516,7 +547,7 @@ def finish_run(
 def recent_changes(
     conn: sqlite3.Connection, days: int = 30, fields: tuple[str, ...] | None = None
 ) -> list[tuple[sqlite3.Row, Comic]]:
-    """최근 바뀐 기록 (바뀐 내용, 작품) — 새것부터. 소식 화면용."""
+    """최근 바뀐 기록 (바뀐 내용, 작품) — 새것부터. 소식 화면용 (단행본 판본 소식은 뺀다)."""
     since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
     sql = "SELECT * FROM comic_changes WHERE changed_at >= ?"
     params: list = [since]
@@ -525,7 +556,11 @@ def recent_changes(
         params += list(fields)
     changes = conn.execute(sql + " ORDER BY changed_at DESC, id DESC", params).fetchall()
     comics = comics_by_ids(conn, {ch["product_no"] for ch in changes})
-    return [(ch, comics[ch["product_no"]]) for ch in changes if ch["product_no"] in comics]
+    return [
+        (ch, comics[ch["product_no"]])
+        for ch in changes
+        if ch["product_no"] in comics and not comics[ch["product_no"]].is_volume
+    ]
 
 
 def comics_by_ids(conn: sqlite3.Connection, product_nos: Iterable[int]) -> dict[int, Comic]:
@@ -541,7 +576,8 @@ def comics_by_ids(conn: sqlite3.Connection, product_nos: Iterable[int]) -> dict[
 def promo_comics(conn: sqlite3.Connection) -> list[Comic]:
     """지금 무료관에 걸린 기간 한정 무료 작품들."""
     rows = conn.execute(
-        _COMIC_SELECT + " WHERE p.label IS NOT NULL ORDER BY c.popularity DESC NULLS LAST"
+        _COMIC_SELECT
+        + f" WHERE p.label IS NOT NULL AND {SHOWN_SQL} ORDER BY c.popularity DESC NULLS LAST"
     ).fetchall()
     return [Comic.from_row(r) for r in rows]
 
@@ -743,12 +779,12 @@ def reviews_with_comics(conn: sqlite3.Connection, user_id: int) -> list[tuple[Re
 
 
 QUICK_SKIP_DAYS = (
-    30  # '안 봤음'은 이 기간만 다시 묻지 않는다 — 그 사이 보게 될 수도 있으니 영원히 가리지 않는다
+    30  # '보류'는 이 기간만 다시 묻지 않는다 — 그 사이 보게 될 수도 있으니 영원히 가리지 않는다
 )
 
 
 def quick_skips(conn: sqlite3.Connection, user_id: int, days: int = QUICK_SKIP_DAYS) -> set[int]:
-    """빠른 평가에서 최근 days 일 안에 '안 봤음'으로 넘긴 작품들. 기간이 지나면 다시 물어본다."""
+    """빠른 평가에서 최근 days 일 안에 '보류'로 넘긴 작품들. 기간이 지나면 다시 물어본다."""
     since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
     rows = conn.execute(
         "SELECT product_no FROM quick_skips WHERE user_id = ? AND skipped_at >= ?", (user_id, since)

@@ -86,3 +86,48 @@ class _Ctx:
 
     def __exit__(self, *exc):
         return False
+
+
+GL = frozenset({"BL", "[GL]"})  # config: EXCLUDED_GENRES=BL + EXCLUDED_TITLE_TAGS=GL
+
+
+def test_title_tag_is_excluded_even_when_genre_is_not():
+    """GL 작품은 장르가 로맨스 등으로 달려 있고 제목에만 [GL] 이 붙는다 — 제목 꼬리표로도 거른다."""
+    assert db.excluded_reason("로맨스", "우리의 계절 [GL]", GL) == "[GL]"
+    assert (
+        db.excluded_reason("로맨스", "[ gl ] 우리의 계절", GL) == "[GL]"
+    )  # 대소문자·괄호 안 공백 무시
+    assert db.excluded_reason("BL", "아무 제목", GL) == "BL"
+    assert db.excluded_reason("로맨스", "GLORY 의 계절", GL) is None  # 꼬리표가 아니면 그대로
+    assert db.excluded_reason("로맨스", "우리의 계절 [GL]", BL) is None  # 설정에 없으면 그대로
+
+
+def test_config_folds_title_tags_into_exclusions(monkeypatch):
+    from my_webtoon.config import load_settings
+
+    monkeypatch.delenv("EXCLUDED_TITLE_TAGS", raising=False)
+    assert "[GL]" in load_settings().excluded_genres  # 기본값
+    monkeypatch.setenv("EXCLUDED_TITLE_TAGS", "gl, [19금] ,")
+    assert {"[gl]", "[19금]"} <= load_settings().excluded_genres
+    monkeypatch.setenv("EXCLUDED_TITLE_TAGS", "")
+    assert not any(e.startswith("[") for e in load_settings().excluded_genres)
+
+
+def test_existing_gl_titles_are_deleted_and_restored(library):
+    with db.session(library) as conn:
+        db.upsert_comic(conn, comic_data(51, "우리의 계절 [GL]", genre="로맨스"))
+        assert db.apply_genre_exclusion(conn, GL) == (1, 0)
+        assert db.get_comic(conn, 51) is None
+        state = conn.execute("SELECT last_error FROM crawl_queue WHERE product_no = 51").fetchone()
+        assert state[0] == "제외 장르:[GL]"
+        assert db.apply_genre_exclusion(conn, BL) == (0, 1)  # 꼬리표 설정을 빼면 다시 가져온다
+
+
+def test_fetch_one_rejects_gl_title():
+    import pytest
+
+    client = FakeClient("로맨스")
+    title = parser.parse_detail(11724795, client.html)["title"]
+    client.html = client.html.replace(title, title + " [GL]")
+    with pytest.raises(parser.ExcludedGenre, match=r"\[GL\]"):
+        runner.fetch_one(client, 11724795, GL)

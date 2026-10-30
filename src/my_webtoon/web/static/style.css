@@ -326,6 +326,32 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
 }
 .nav__sub a:hover, .usermenu__panel a:hover, .usermenu__panel button:hover { background: var(--surface-2); color: var(--text); }
 .nav__sub a.is-on, .usermenu__panel a.is-on { color: var(--text); font-weight: 700; }
+/* 위 메뉴 검색 + 자동완성 목록 */
+.search { position: relative; flex: 0 1 280px; min-width: 0; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--text-3); }
+.search:focus-within { border-color: var(--accent); box-shadow: var(--focus); }
+.search__input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: var(--text-sm); color: var(--text); }
+.search__input::-webkit-search-cancel-button { cursor: pointer; }
+.search__key { flex: none; font: inherit; font-size: 11px; line-height: 1; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--text-3); }
+.search:focus-within .search__key { display: none; }
+.search__list {
+  display: none; position: absolute; top: calc(100% + 6px); left: 0; width: max(100%, 380px); max-height: min(70vh, 520px); overflow-y: auto;
+  padding: var(--space-1); z-index: 40; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.12);
+}
+.search__list.is-open { display: block; }
+.search__item { display: flex; align-items: center; gap: var(--space-3); padding: 6px 8px; border-radius: var(--radius-sm); color: var(--text); text-decoration: none; }
+.search__item:hover, .search__item:focus { background: var(--surface-2); outline: none; }
+.search__thumb { flex: none; width: 34px; aspect-ratio: 2 / 3; border-radius: 4px; overflow: hidden; background: var(--surface-2); }
+.search__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.search__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.search__text b, .search__text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search__text b { font-size: var(--text-sm); }
+.search__text small { font-size: var(--text-xs); color: var(--text-3); }
+.search__text mark { background: none; color: var(--accent-strong); }
+.search__item .badge { flex: none; }
+.search__all { color: var(--text-2); font-size: var(--text-sm); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-sm) var(--radius-sm); margin-top: 2px; }
+.search__empty { margin: 0; padding: 10px; font-size: var(--text-sm); color: var(--text-3); }
 .topbar__user { flex: none; display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-3); }
 .usermenu { position: relative; }
 .usermenu__button {
@@ -357,6 +383,10 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) var(--s
 .tabbar { display: none; }
 @media (max-width: 720px) {
   .nav, .usermenu__name { display: none; }
+  .brand { font-size: 0; gap: 0; }  /* 좁은 화면: 로고만 남기고 검색창에 자리를 준다 */
+  .search { flex: 1; }
+  .search__key { display: none; }
+  .search__list { position: fixed; top: 56px; left: var(--space-4); right: var(--space-4); width: auto; }
   .topbar__inner { height: 52px; justify-content: space-between; }
   .tabbar {
     display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
@@ -596,3 +626,15 @@ footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); pa
 .mb-4 { margin-bottom: var(--space-4); }
 .mb-5 { margin-bottom: var(--space-5); }
 .m-0 { margin: 0; }
+
+/* 사용 가이드 */
+.guide__toc { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); font-size: var(--text-sm); }
+.guide__toc a { color: var(--text-2); text-decoration: none; }
+.guide__toc a:hover { color: var(--accent-strong); }
+.guide { scroll-margin-top: 72px; }
+.guide h2 { margin-top: 0; }
+.guide ul, .guide ol { padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+.guide__formula { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); font-weight: 600; font-size: var(--text-sm); }
+.guide__tones { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--space-2); }
+.guide__tones p { margin: 0; display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.guide kbd { font: inherit; font-size: 0.85em; padding: 1px 6px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--surface); }

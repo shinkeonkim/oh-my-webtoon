@@ -201,16 +201,46 @@ def test_editions_are_grouped_and_reviewed_work_is_excluded(library):
     from .conftest import comic_data
 
     with db.session(library) as conn:
-        db.upsert_comic(conn, comic_data(60, "검황 회귀전 [단행본]", genre="무협", tags=["회귀"], authors=["이검객"],
-                                         synopsis="검황이 회귀하여 무림에 복수한다", unit="권"))  # fmt: skip
-        db.upsert_comic(conn, comic_data(61, "천마 회귀록 [단행본]", genre="무협", tags=["회귀"], authors=["김무협"],
-                                         synopsis="천마가 회귀해 무림을 평정한다", unit="권"))  # fmt: skip
+        db.upsert_comic(conn, comic_data(60, "검황 회귀전 [개정판]", genre="무협", tags=["회귀"], authors=["이검객"],
+                                         synopsis="검황이 회귀하여 무림에 복수한다"))  # fmt: skip
+        db.upsert_comic(conn, comic_data(61, "천마 회귀록 [개정판]", genre="무협", tags=["회귀"], authors=["김무협"],
+                                         synopsis="천마가 회귀해 무림을 평정한다"))  # fmt: skip
         db.update_review(conn, ME, 1, score=10)  # '천마 회귀록' 평가
         recs = Engine().recommend(conn, ME, ScoringOptions(sink_stingy=False))
     names = titles(recs)
-    assert "천마 회귀록 [단행본]" not in names  # 평가한 작품의 다른 판본은 빠진다
+    assert "천마 회귀록 [개정판]" not in names  # 평가한 작품의 다른 판본은 빠진다
     assert sum(1 for t in names if t.startswith("검황 회귀전")) == 1  # 판본은 하나만
     assert next(r for r in recs if r.comic.title.startswith("검황 회귀전")).variants == 1
+
+
+def test_volumes_are_stored_but_never_shown(library):
+    """단행본(권) 판본은 수집·저장은 하지만 추천·빠른 평가·검색·목록·소식에는 안 나온다. 단행본에 남긴 평가는 취향에 들어간다."""
+    from .conftest import comic_data
+
+    with db.session(library) as conn:
+        db.upsert_comic(conn, comic_data(70, "로맨스 단행본 [단행본]", genre="로맨스", tags=["계약"], unit="권",
+                                         synopsis="공작님과 계약 결혼 정원 악녀", popularity=10**9))  # fmt: skip
+        db.upsert_comic(
+            conn, comic_data(71, "다른 단행본", genre="무협", unit="권", synopsis="회귀 무림 천마")
+        )
+        assert db.get_comic(conn, 70) is not None  # 저장은 된다
+        engine = Engine()
+        db.update_review(conn, ME, 1, score=10)
+        shown = {
+            r.comic.product_no
+            for r in engine.recommend(conn, ME, ScoringOptions(sink_stingy=False), limit=50)
+        }
+        assert not shown & {70, 71}
+        assert not {c.product_no for c in engine.quick_queue(conn, ME, limit=50)} & {70, 71}
+        assert not {c.product_no for c in engine.popular(conn, ScoringOptions(), ME)} & {70, 71}
+        assert not {c.product_no for c in db.search_comics(conn, "단행본")} & {70, 71}
+        listed, _ = db.list_comics(conn, limit=100)
+        assert not {c.product_no for c in listed} & {70, 71}
+        # 단행본에 준 10점은 그대로 취향이 된다 → 로맨스(5, 6)가 무협보다 위로
+        db.delete_review(conn, ME, 1)
+        db.update_review(conn, ME, 70, score=10)
+        recs = engine.recommend(conn, ME, ScoringOptions(sink_stingy=False))
+    assert recs and recs[0].comic.product_no in {5, 6}
 
 
 def test_snapshot_keeps_pages_stable_when_ratings_change(library):

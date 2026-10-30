@@ -53,6 +53,7 @@ class _Scores:
     boost: np.ndarray
     stingy: np.ndarray  # bool
     adult: np.ndarray  # bool
+    hidden: np.ndarray  # bool — 화면에 안 내는 단행본 판본 (Comic.is_volume). 취향 계산엔 쓰고 후보·비교 대상에선 뺀다
 
 
 @dataclass
@@ -159,6 +160,7 @@ class Engine:
                 boost=np.array([scoring.boost(c, opts) for c in comics]),
                 stingy=np.array([scoring.is_stingy(c, opts) for c in comics], dtype=bool),
                 adult=np.array([scoring.is_adult(c) for c in comics], dtype=bool),
+                hidden=np.array([c.is_volume for c in comics], dtype=bool),
             )
             if features is self._features:
                 cache[opts] = scores
@@ -248,7 +250,7 @@ class Engine:
         if sims is None:
             return None
         scores = self._scores_for(features, opts)
-        keep = np.ones(len(sims), dtype=bool) if opts.include_adult else ~scores.adult
+        keep = ~scores.hidden if opts.include_adult else ~(scores.adult | scores.hidden)
         boosts = scores.boost
         finals = sims * boosts
         row = features.index[product_no]
@@ -286,7 +288,9 @@ class Engine:
             return {}
         scores = self._scores_for(features, opts)
         finals = sims * scores.boost
-        pool = np.sort(finals if opts.include_adult else finals[~scores.adult])
+        pool = np.sort(
+            finals[~scores.hidden if opts.include_adult else ~(scores.adult | scores.hidden)]
+        )
         n = max(1, len(pool) - 1)
         below = np.searchsorted(pool, finals, side="left")
         return {
@@ -332,6 +336,7 @@ class Engine:
             c
             for c in self._comics.values()
             if self._work[c.product_no] not in reviewed_works
+            and not c.is_volume
             and (opts.include_adult or not scoring.is_adult(c))
         ]
         candidates.sort(key=lambda c: -math.log1p(c.popularity or 0) * scoring.boost(c, opts))
@@ -381,7 +386,7 @@ class Engine:
         scored = []
         for row, no in enumerate(features.product_nos):
             comic = self._comics[no]
-            if self._work[no] in done_works or scoring.is_adult(comic):
+            if self._work[no] in done_works or comic.is_volume or scoring.is_adult(comic):
                 continue
             scored.append(
                 (math.log1p(comic.popularity or 0) * (1 + 2 * max(0.0, sims[row])), comic)
@@ -474,7 +479,7 @@ class Engine:
         # 거르기·점수·정렬은 배열로 한 번에 — 작품 수천 개를 파이썬으로 돌면 요청마다 수십~수백 ms 였다
         scores = self._scores_for(features, opts)
         finals = similarities * scores.boost
-        keep = np.ones(len(similarities), dtype=bool)
+        keep = ~scores.hidden
         if only is None:  # '본 것만'에선 취향과 반대인 작품도 순위에 둔다
             keep &= similarities > 0
         if not opts.include_adult:

@@ -346,3 +346,28 @@ def test_theme_rejects_unknown_value_and_foreign_redirect(client):
     assert res.headers["location"] == "/"
     client.cookies.set("theme", "pink")  # 손으로 바꾼 쿠키는 무시
     assert "data-theme=" not in client.get("/").text.split(">", 2)[1]
+
+
+def test_navbar_search_suggests_and_links_to_detail(client):
+    assert 'class="search__input"' in client.get("/").text  # 모든 화면 위 메뉴에 검색창
+    html = client.get("/search/suggest", params={"q": "천마"}).text
+    assert "<html" not in html and 'href="/comic/1"' in html  # 조각만, 누르면 상세로
+    assert "<mark>천마</mark>" in html
+    assert 'href="/comics?q=%EC%B2%9C%EB%A7%88"' in html  # 전체 결과 보기
+    assert (
+        'href="/comic/1"' in client.get("/search/suggest", params={"q": "천마회귀"}).text
+    )  # 띄어쓰기 무시
+    assert "맞는 작품이 없어요" in client.get("/search/suggest", params={"q": "없는제목"}).text
+    assert client.get("/search/suggest", params={"q": " "}).text.strip() == ""
+
+
+def test_search_and_guide_are_public(library):
+    from .conftest import make_client
+
+    with make_client(library, password="pw") as anon:
+        assert 'href="/comic/1"' in anon.get("/search/suggest", params={"q": "천마"}).text
+        guide = anon.get("/guide")
+        assert (
+            guide.status_code == 200 and "사용 가이드" in guide.text and 'id="match"' in guide.text
+        )
+        assert "badge--match-" not in anon.get("/search/suggest", params={"q": "천마"}).text

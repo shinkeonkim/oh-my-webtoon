@@ -1,0 +1,18 @@
+{#- 위 메뉴 검색창의 자동완성 목록 (GET /search/suggest). 항목을 누르면 바로 작품 상세로 간다.
+    키보드: 검색창에서 ↓/↑ 로 항목 이동, Enter 로 열기, Esc 로 닫기 (base.html 스크립트). -#}
+{% import "_ui.html" as ui %}
+{%- if q %}
+{%- for comic in comics %}
+<a class="search__item" role="option" href="/comic/{{ comic.product_no }}">
+  <span class="search__thumb">{% if comic.thumbnail_url %}<img src="{{ comic.thumbnail_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}</span>
+  <span class="search__text">
+    <b>{{ comic.title | highlight(q) }}</b>
+    <small>{{ (comic.authors + [comic.genre, comic.status]) | select | join(' · ') }}</small>
+  </span>
+  {%- if match_of is defined %}{{ ui.match_badge(comic.product_no, match_of(comic.product_no), anchored=False) }}{% endif %}
+</a>
+{%- else %}
+<p class="search__empty">'{{ q }}' 에 맞는 작품이 없어요. 아직 수집하지 않은 작품일 수 있어요.</p>
+{%- endfor %}
+<a class="search__item search__all" role="option" href="/comics?q={{ q | urlencode }}">{{ ui.icon('search', 14) }}<span>'{{ q }}' 검색 결과 전체 보기</span></a>
+{%- endif %}
