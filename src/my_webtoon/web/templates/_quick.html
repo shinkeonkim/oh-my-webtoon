@@ -1,8 +1,27 @@
 {#- 빠른 평가 한 장 = 폼 하나. 별점을 고른 뒤 '저장하고 다음', 아니면 '보류'.
     응답으로 다음 장이 오면 이 조각 전체(#quick)를 바꾼다. done: 이번에 넘긴 장 수, last: 방금 넘긴 작품(되돌리기용),
-    explore: 취향 밖에서 섞어 넣은 장인지 (engine.quick_next) -#}
+    explore: 취향 밖에서 섞어 넣은 장인지 (engine.quick_next),
+    welcome: 온보딩 진행 상황 {count, target, done} 또는 None (app.onboarding) -#}
 {% import "_ui.html" as ui %}
 <section id="quick" class="quick">
+  {%- if welcome %}
+  <div class="onboard{{ ' is-done' if welcome.done }}">
+    {%- if welcome.done %}
+    <p class="onboard__title">{{ ui.icon('sparkle') }}<b>취향을 대략 파악했어요!</b></p>
+    <p>평가 {{ welcome.count }}개로 추천을 만들었어요. 더 평가할수록 정확해지니 여기서 계속 이어 가도 좋아요.</p>
+    <p>{{ ui.button('추천 보러 가기', 'primary', href='/', icon_name='sparkle') }}</p>
+    {%- else %}
+    <p class="onboard__title"><b>처음 오셨네요 — 취향부터 알려 주세요</b></p>
+    <p>장르별로 많이 본 대표작을 하나씩 보여 드려요. <b>본 작품엔 별점</b>, 안 봤으면 <b>보류</b>로 넘기세요.
+      별점 {{ welcome.target }}개가 모이면 추천을 볼 수 있어요.</p>
+    {{ ui.progress(welcome.count * 100 // welcome.target, '온보딩 진행') }}
+    <div class="onboard__meta">
+      <span><b>{{ welcome.count }}</b> / {{ welcome.target }}</span>
+      <form method="post" action="/onboarding/skip" class="inline"><button type="submit" class="link-btn">나중에 할게요</button></form>
+    </div>
+    {%- endif %}
+  </div>
+  {%- endif %}
   <p class="quick__progress muted small">
     이번에 {{ done }}장 · 내 평가 {{ review_count }}개
     {%- if last %}

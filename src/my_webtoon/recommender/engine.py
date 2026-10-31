@@ -40,7 +40,8 @@ from .works import work_keys
 SNAPSHOT_TTL = timedelta(minutes=30)
 DIVERSITY_WINDOW = 150  # 다양화(MMR)는 앞쪽 이만큼만 다시 줄 세운다 — 뒤쪽은 어차피 잘 안 본다
 EXPLORE_EVERY = 4  # 빠른 평가에서 이 장마다 한 번은 덜 평가한 장르의 작품 (quick_next)
-EXPLORE_GENRES = 5  # 그 '덜 평가한 장르'를 몇 개까지 돌아가며 고를지
+EXPLORE_GENRES = 5
+ONBOARDING_MIN_GENRE = 5  # 온보딩에서 돌아가며 물어볼 장르: 남은 작품이 이만큼은 있는 장르만  # 그 '덜 평가한 장르'를 몇 개까지 돌아가며 고를지
 REFRESH_INTERVAL = 600  # 초. invalidate 없이 작품 데이터만 바뀌었을 때 다시 만드는 최소 간격
 
 log = logging.getLogger(__name__)
@@ -369,6 +370,35 @@ class Engine:
             if pick is not None:
                 return pick, True
         return candidates[0], False
+
+    def onboarding_next(self, conn: sqlite3.Connection, user_id: int) -> Comic | None:
+        """처음 들어온 사용자(평가가 적을 때)의 빠른 평가 다음 장 — 대략적인 취향을 빨리 잡는 게 목표.
+
+        아직 취향이 없으니 유사도로 고를 수 없다. 대신 **장르를 돌아가며 그 장르에서 가장 많이 본 작품**을 낸다:
+        지금까지 답한(평가·보류) 수가 가장 적은 장르 → 그 장르의 다운로드 1위. 많이 본 작품이라 '봤음'일 확률이
+        높고, 장르를 고르게 훑어서 첫 10개만으로도 좋아하는 장르·싫어하는 장르가 갈린다.
+        작품이 몇 개 없는 장르(ONBOARDING_MIN_GENRE 미만)는 대표작이라 하기 어려워 뺀다.
+        """
+        candidates = self._quick_candidates(conn, user_id)
+        if not candidates:
+            return None
+        answered = Counter(
+            self._comics[no].genre
+            for no in (*db.all_reviews(conn, user_id), *db.quick_skips(conn, user_id))
+            if no in self._comics
+        )
+        size = Counter(c.genre for c in candidates if c.genre)
+        weight = Counter()
+        for c in candidates:
+            if c.genre:
+                weight[c.genre] += c.popularity or 0
+        genres = [g for g, n in size.items() if n >= ONBOARDING_MIN_GENRE] or list(size)
+        if not genres:
+            return max(candidates, key=lambda c: c.popularity or 0)
+        genre = min(
+            genres, key=lambda g: (answered[g], -weight[g])
+        )  # 덜 물어본 장르, 같으면 큰 장르부터
+        return max((c for c in candidates if c.genre == genre), key=lambda c: c.popularity or 0)
 
     def _quick_candidates(self, conn: sqlite3.Connection, user_id: int) -> list[Comic]:
         features = self._load(conn)

@@ -116,10 +116,11 @@ def test_public_pages_are_read_only(library):
 
 
 def test_login_and_my_page(library):
+    # 로그인 확인은 /settings 로 — / 는 평가가 적은 새 계정을 온보딩(/quick)으로 보낸다
     with make_client(library, password="initial-pw") as c:
         assert "error=1" in str(login(c, password="wrong").url)
         login(c)
-        assert c.get("/", follow_redirects=False).status_code == 200
+        assert c.get("/settings", follow_redirects=False).status_code == 200
         me = c.get("/me", follow_redirects=False)
         assert me.headers["location"] == "/users/singun11"
 
@@ -128,7 +129,7 @@ def test_change_password_logs_out_other_sessions(library):
     with make_client(library, password="initial-pw") as a, make_client(library, "initial-pw") as b:
         for c in (a, b):
             login(c)
-            assert c.get("/", follow_redirects=False).status_code == 200
+            assert c.get("/settings", follow_redirects=False).status_code == 200
 
         bad = a.post(
             "/settings/password", data={"current": "x", "new": "n" * 8, "confirm": "n" * 8}
@@ -143,12 +144,12 @@ def test_change_password_logs_out_other_sessions(library):
             data={"current": "initial-pw", "new": "new-pw-123", "confirm": "new-pw-123"},
         )
 
-        assert a.get("/", follow_redirects=False).status_code == 200  # 바꾼 세션은 유지
-        assert b.get("/", follow_redirects=False).status_code == 303  # 다른 세션은 끊김
+        assert a.get("/settings", follow_redirects=False).status_code == 200  # 바꾼 세션은 유지
+        assert b.get("/settings", follow_redirects=False).status_code == 303  # 다른 세션은 끊김
         login(b)
-        assert b.get("/", follow_redirects=False).status_code == 303  # 옛 비밀번호 안 됨
+        assert b.get("/settings", follow_redirects=False).status_code == 303  # 옛 비밀번호 안 됨
         login(b, password="new-pw-123")
-        assert b.get("/", follow_redirects=False).status_code == 200
+        assert b.get("/settings", follow_redirects=False).status_code == 200
 
 
 def test_admin_adds_user_and_reviews_stay_separate(library):
@@ -381,3 +382,49 @@ def test_search_and_guide_are_public(library):
         for name in names:
             assert anon.get(f"/static/guide/{name}.webp").status_code == 200, name
         assert "badge--match-" not in anon.get("/search/suggest", params={"q": "천마"}).text
+
+
+def test_new_account_is_onboarded_with_genre_representatives(library):
+    """새 계정(평가 < 10)은 / 대신 빠른 평가로 간다. 장르를 돌아가며 그 장르에서 가장 많이 본 작품을 묻고,
+    10개를 채우면 '추천 보러 가기'를 한 번 띄운 뒤부터는 / 가 그대로 열린다."""
+    from my_webtoon.web.app import ONBOARDING_TARGET
+
+    from .conftest import comic_data
+
+    with db.session(library) as conn:  # 장르마다 대표작 후보가 넉넉하게 (장르 셋 × 6편)
+        for i, genre in enumerate(["무협", "순정", "판타지"]):
+            for j in range(6):
+                no = 300 + i * 10 + j
+                db.upsert_comic(
+                    conn, comic_data(no, f"{genre} {j}", genre=genre, popularity=1000 - j)
+                )
+    with make_client(library, "initial-pw") as admin, make_client(library, "initial-pw") as new:
+        login(admin)
+        admin.post("/settings/users", data={"username": "newbie", "password": "newbie-pw-1"})
+        login(new, "newbie", "newbie-pw-1")
+        assert new.get("/", follow_redirects=False).headers["location"] == "/quick"
+        page = new.get("/quick").text
+        assert "처음 오셨네요" in page and "0</b> / 10" in page
+
+        genres = []
+        for n in range(ONBOARDING_TARGET):
+            no = int(re.search(r'hx-post="/quick/(\d+)"', page).group(1))
+            with db.session(library) as conn:
+                genres.append(db.get_comic(conn, no).genre)
+            page = new.post(
+                f"/quick/{no}", data={"action": "save", "score": "8", "done": str(n)}, headers=HX
+            ).text
+        assert len(set(genres[:3])) == 3  # 처음 세 장은 서로 다른 장르
+        assert "취향을 대략 파악했어요" in page and 'href="/"' in page
+        assert new.get("/", follow_redirects=False).status_code == 200  # 이제 추천 화면
+        assert "처음 오셨네요" not in new.get("/quick").text
+
+
+def test_onboarding_can_be_skipped(library):
+    with make_client(library, "initial-pw") as admin, make_client(library, "initial-pw") as new:
+        login(admin)
+        admin.post("/settings/users", data={"username": "later", "password": "later-pw-1"})
+        login(new, "later", "later-pw-1")
+        assert new.get("/", follow_redirects=False).status_code == 303
+        new.post("/onboarding/skip")
+        assert new.get("/", follow_redirects=False).status_code == 200  # 건너뛰면 다시 안 보낸다

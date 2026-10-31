@@ -68,6 +68,8 @@ ALWAYS_PUBLIC = ("/login", "/demo", "/static", "/healthz", "/readyz", "/theme")
 # system 이면 OS 설정(prefers-color-scheme)을 따른다. 서버가 <html data-theme> 으로 그려서 깜빡임이 없다.
 THEMES = ("system", "light", "dark")
 SUGGEST_LIMIT = 8  # 검색 자동완성에 보여 줄 작품 수
+ONBOARDING_TARGET = 10  # 처음 들어온 사용자에게 받을 평가 수 (그 전엔 / 대신 빠른 평가로)
+ONBOARDING_META = "onboarding:"  # meta 키 접두사 + user id → 'done' / 'skipped'
 THEME_COOKIE = "theme"
 PUBLIC_GET = ("/comics", "/comic/", "/users", "/ui", "/search", "/guide")  # 읽기 전용 공개 화면
 NEWS_DAYS = 30  # 소식 화면이 보여 주는 기간
@@ -281,6 +283,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, conn=Depends(get_conn), page: int = 0, snap: str = ""):
         user = me(request)
+        welcome = onboarding(request, conn)
+        if welcome and not welcome["done"] and engine.onboarding_next(conn, user.id) is not None:
+            return RedirectResponse("/quick", status_code=303)  # 처음이면 취향부터 (위 '온보딩')
         opts = options_from_query(request)
         # snap: 첫 페이지에서 만든 순위 스냅숏. 다음 페이지는 같은 순위에서 이어서 잘라 중복·누락이 없다.
         recs, snap = engine.recommend_page(
@@ -333,16 +338,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #   skip  보류 — 평가 아님, db.QUICK_SKIP_DAYS 동안만 다시 묻지 않는다 (quick_skips)
     # 몇 장마다 한 번은 덜 평가한 장르의 작품이 섞여 나온다 (engine.quick_next).
 
+    # -- 온보딩: 처음 들어온 사용자는 빠른 평가로 대략적인 취향부터 ---------------------------------
+    # 평가가 ONBOARDING_TARGET 개보다 적으면 추천 화면(/) 대신 빠른 평가로 보낸다. 이때는 장르별 대표작을 돌아가며
+    # 묻는다(engine.onboarding_next). 목표를 채우면 한 번 '추천 보러 가기'를 띄우고 끝 — 다시 묻지 않는다.
+    # '나중에 할게요'로 건너뛸 수 있다. 데모 계정과 비밀번호 없는 로컬 모드(open_mode)는 온보딩하지 않는다.
+
+    def onboarding(request: Request, conn) -> dict | None:
+        """온보딩 중이면 {'count', 'target', 'done'} (done = 방금 목표를 채움), 아니면 None."""
+        user = request.state.user
+        if user is None or user.is_demo or request.state.open_mode:
+            return None
+        if db.get_meta(conn, f"{ONBOARDING_META}{user.id}"):
+            return None
+        count = sum(1 for r in db.all_reviews(conn, user.id).values() if r.status != "dismissed")
+        if count >= ONBOARDING_TARGET:
+            db.set_meta(conn, f"{ONBOARDING_META}{user.id}", "done")  # 다음부턴 일반 화면
+            return {"count": count, "target": ONBOARDING_TARGET, "done": True}
+        return {"count": count, "target": ONBOARDING_TARGET, "done": False}
+
+    @app.post("/onboarding/skip")
+    def onboarding_skip(request: Request, conn=Depends(get_conn)):
+        db.set_meta(conn, f"{ONBOARDING_META}{me(request).id}", "skipped")
+        return RedirectResponse("/", status_code=303)
+
     def quick_card(request: Request, conn, done: int = 0, last=None, comic=None, error=""):
         user = me(request)
         explore = False
+        welcome = onboarding(request, conn)
         if comic is None:
-            comic, explore = engine.quick_next(conn, user.id, done)
+            if welcome and not welcome["done"]:
+                comic = engine.onboarding_next(conn, user.id)
+            else:
+                comic, explore = engine.quick_next(conn, user.id, done)
         return render(
             request,
             "_quick.html" if request.headers.get("HX-Request") else "quick.html",
             comic=comic,
             explore=explore,
+            welcome=welcome,
             done=done,
             last=last,
             error=error,
@@ -928,7 +961,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return render(
             request, "guide.html",
             settings=settings, skip_days=db.QUICK_SKIP_DAYS, explore_every=EXPLORE_EVERY,
-            news_days=NEWS_DAYS, tones=[(t, MATCH_TONE_LABELS[t], r) for t, r in MATCH_TONE_RANGES],
+            news_days=NEWS_DAYS, onboarding_target=ONBOARDING_TARGET, tones=[(t, MATCH_TONE_LABELS[t], r) for t, r in MATCH_TONE_RANGES],
         )  # fmt: skip
 
     @app.post("/theme")
