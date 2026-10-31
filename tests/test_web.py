@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from my_webtoon import db
@@ -371,6 +373,11 @@ def test_search_and_guide_are_public(library):
         assert 'href="/comic/1"' in anon.get("/search/suggest", params={"q": "천마"}).text
         guide = anon.get("/guide")
         assert (
-            guide.status_code == 200 and "사용 가이드" in guide.text and 'id="match"' in guide.text
+            guide.status_code == 200 and "사용 가이드" in guide.text and 'id="detail"' in guide.text
         )
+        # 가이드가 가리키는 스크린샷이 모두 있다 (scripts/guide_screenshots.py 로 찍은 라이트·다크 한 쌍)
+        names = set(re.findall(r"/static/guide/([\w-]+)\.webp", guide.text))
+        assert len(names) >= 20
+        for name in names:
+            assert anon.get(f"/static/guide/{name}.webp").status_code == 200, name
         assert "badge--match-" not in anon.get("/search/suggest", params={"q": "천마"}).text

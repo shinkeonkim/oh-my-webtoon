@@ -636,6 +636,32 @@ footer { text-align: center; color: var(--text-3); font-size: var(--text-xs); pa
 .guide h2 { margin-top: 0; }
 .guide ul, .guide ol { padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
 .guide__formula { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); font-weight: 600; font-size: var(--text-sm); }
-.guide__tones { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--space-2); }
+.guide__tones { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--space-2); margin: var(--space-3) 0; }
 .guide__tones p { margin: 0; display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
 .guide kbd { font: inherit; font-size: 0.85em; padding: 1px 6px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--surface); }
+.guide__split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+@media (max-width: 760px) { .guide__split { grid-template-columns: 1fr; } }
+/* 그림 위 번호와 짝을 이루는 설명 목록: 번호를 동그라미로 */
+.guide .guide__legend { list-style: none; padding: 0; counter-reset: legend; gap: var(--space-2); }
+.guide__legend li { counter-increment: legend; position: relative; padding-left: 30px; font-size: var(--text-sm); }
+.guide__legend li::before, .shot__mark {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--promo); color: #fff; font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.guide__legend li::before { content: counter(legend); position: absolute; left: 0; top: 0; }
+.guide__legend--row { margin-top: var(--space-3); }
+
+/* 가이드 스크린샷: 라이트·다크 두 장 중 지금 테마에 맞는 쪽만 (토큰과 같은 규칙 — 위 :root 블록들) */
+.shot { margin: var(--space-3) 0; }
+.shot--narrow { max-width: 460px; }
+.shot__frame { position: relative; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface-2); }
+.shot__frame img { display: block; width: 100%; height: auto; }
+.shot__dark { display: none !important; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shot__light { display: none !important; }
+  :root:not([data-theme="light"]) .shot__dark { display: block !important; }
+}
+:root[data-theme="dark"] .shot__light { display: none !important; }
+:root[data-theme="dark"] .shot__dark { display: block !important; }
+.shot__mark { position: absolute; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--surface), 0 2px 6px rgb(0 0 0 / 0.3); }
+.shot figcaption { margin-top: 6px; font-size: var(--text-xs); color: var(--text-3); }

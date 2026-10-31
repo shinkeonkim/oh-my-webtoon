@@ -1,100 +1,161 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
 {% block title %}사용 가이드 · my-webtoon{% endblock %}
-{#- 사용 가이드. 숫자(기간·간격·구간)는 코드 상수를 그대로 받아서 쓴다 — 코드를 바꾸면 가이드도 같이 바뀌게 (app.guide). -#}
+{#- 사용 가이드. 숫자(기간·간격·구간)는 코드 상수를 그대로 받아서 쓴다 — 코드를 바꾸면 가이드도 같이 바뀌게 (app.guide).
+    그림은 데모 계정 화면을 scripts/guide_screenshots.py 로 찍은 것 (static/guide/<이름>-light|dark.webp).
+    화면을 바꿨으면 그 스크립트를 다시 돌린다. 그림 위 번호(marks)는 그림 크기에 대한 % 위치라 그림을 다시 찍으면 확인할 것. -#}
+
+{#- 스크린샷 한 장: 테마에 맞는 쪽만 보인다(.shot__light / .shot__dark). marks: [(번호, 가로%, 세로%), ...] -#}
+{% macro shot(name, alt, caption=None, marks=[], narrow=False) -%}
+<figure class="shot{{ ' shot--narrow' if narrow }}">
+  <div class="shot__frame">
+    <img class="shot__light" src="/static/guide/{{ name }}-light.webp?v={{ static_version }}" alt="{{ alt }}" loading="lazy">
+    <img class="shot__dark" src="/static/guide/{{ name }}-dark.webp?v={{ static_version }}" alt="{{ alt }}" loading="lazy">
+    {%- for n, x, y in marks %}<span class="shot__mark" style="left: {{ x }}%; top: {{ y }}%" aria-hidden="true">{{ n }}</span>{% endfor %}
+  </div>
+  {%- if caption %}<figcaption>{{ caption }}</figcaption>{% endif %}
+</figure>
+{%- endmacro %}
+
 {% block content %}
 {{ ui.page_header('사용 가이드', '네이버 시리즈 만화를 내 평가로 추천받는 방법') }}
 
 <nav class="panel guide__toc" aria-label="목차">
-  <a href="#start">시작하기</a><a href="#rate">평가하기</a><a href="#quick">빠른 평가</a><a href="#recs">추천 보기</a>
-  <a href="#match">추천도</a><a href="#news">소식</a><a href="#search">검색</a><a href="#more">그 밖에</a>
+  <a href="#start">시작하기</a><a href="#recs">추천 화면</a><a href="#card">작품 카드</a><a href="#detail">작품 화면 · 추천도</a>
+  <a href="#quick">빠른 평가</a><a href="#rate">찾아서 평가</a><a href="#search">검색</a><a href="#news">소식</a>
+  <a href="#taste">내 취향</a><a href="#more">설정 · 테마 · 휴대폰</a>
 </nav>
 
 <section class="panel guide" id="start">
   <h2>시작하기</h2>
   <p>my-webtoon 은 <b>내가 남긴 평가만으로</b> 작품을 추천해요. 다른 사람의 평가는 섞지 않아요. 그래서 처음엔 추천이 비어 있고, 평가가 쌓일수록 정확해져요.</p>
-  <ol>
-    <li><a href="/quick">빠른 평가</a>에서 이미 본 작품에 별점을 10개쯤 남겨 보세요.</li>
-    <li><a href="/">추천</a> 화면에 내 취향에 맞는 작품이 순서대로 나와요.</li>
-    <li>마음에 드는 작품을 눌러 <b>네이버 시리즈에서 보기</b>로 바로 이동하세요.</li>
+  <ol class="guide__steps">
+    <li><b><a href="/quick">빠른 평가</a></b>에서 이미 본 작품에 별점을 10개쯤 남겨요. 안 본 작품은 '보류'로 넘기면 돼요.</li>
+    <li><b><a href="/">추천</a></b> 화면에 내 취향에 맞는 작품이 순서대로 나와요.</li>
+    <li>마음에 드는 작품을 눌러 <b>네이버 시리즈에서 보기</b>로 바로 이동해요. 다 보고 나면 별점을 남겨 주세요 — 다음 추천이 더 좋아져요.</li>
   </ol>
-  {%- if not authed %}<p>둘러보기만 하려면 <a href="/demo">데모 계정</a>으로 들어가 보세요. 데모 계정의 평가는 매일 밤 처음 상태로 돌아가요.</p>{% endif %}
-</section>
-
-<section class="panel guide" id="rate">
-  <h2>평가하기</h2>
-  <p>작품 카드나 작품 화면의 평가 위젯에서 남겨요. 누르는 즉시 저장돼요.</p>
-  <ul>
-    <li><b>별점</b> — 반 개 단위, 0~10점. 같은 별을 다시 누르면 지워져요.</li>
-    <li><b>상태</b> — {% for k, label in STATUSES.items() %}{{ label }}{{ ' · ' if not loop.last }}{% endfor %}. 별점과 따로 남길 수 있어요. 별점이 있으면 별점이 취향에 더 크게 반영돼요.</li>
-    <li><b>세부 평가·메모</b> — 연필 아이콘. {% for k, label in ASPECTS.items() %}{{ label }}{{ ' · ' if not loop.last }}{% endfor %} 점수, 본 화수, 메모. 본 화수를 남기면 소식 화면에 '이어 보기'로 나와요.</li>
-    <li><b>시리즈에서 가져오기</b> — 네이버 시리즈 내 서재를 한 번에 가져올 수 있어요 (<a href="/import/series">평가 → 시리즈에서 가져오기</a>).</li>
-  </ul>
-  <p class="muted small">취향 반영: 10점일수록 강하게 끌어당기고, 4점은 중립, 그보다 낮으면 비슷한 작품을 조금 밀어내요. 오래된 평가는 조금씩 약해져요.</p>
-</section>
-
-<section class="panel guide" id="quick">
-  <h2>빠른 평가</h2>
-  <p>한 장씩 넘기며 평가 수를 빠르게 늘리는 화면이에요. 할 수 있는 건 둘뿐이에요.</p>
-  <ul>
-    <li><b>별점 고르고 '저장하고 다음'</b> — 상태는 '봤음'으로 저장돼요.</li>
-    <li><b>'보류 · 넘기기'</b> — 안 봤거나 애매할 때. 취향에 반영하지 않고 {{ skip_days }}일 동안 다시 묻지 않아요.</li>
-  </ul>
-  <p>많이 본 작품, 내 취향과 가까운 작품부터 물어봐요. 한 장르로만 좁아지지 않도록 <b>{{ explore_every }}장마다 한 번은 내가 덜 평가한 장르의 작품</b>이 섞여 나와요 ({{ ui.badge('다른 취향도 섞어 볼게요', 'promo', icon_name='sparkle') }} 표시).</p>
-  <p class="muted small">실수로 넘겼다면 위쪽의 '되돌리기'를 누르세요.</p>
+  {%- if not authed %}<p>둘러보기만 하려면 <a href="/demo">데모 계정</a>으로 들어가 보세요. 이 가이드의 그림도 데모 계정 화면이에요. 데모 계정의 평가는 매일 밤 처음 상태로 돌아가요.</p>{% endif %}
 </section>
 
 <section class="panel guide" id="recs">
-  <h2>추천 보기</h2>
-  <p>추천 순서는 이렇게 정해요.</p>
-  <p class="guide__formula">최종 점수 = 취향 유사도 × 보정(무료 회차 · 총 회차 · 네이버 평점)</p>
+  <h2>추천 화면</h2>
+  {{ shot('recs', '추천 화면: 내 취향에 맞는 작품 카드가 순위대로 나열돼 있다') }}
+  <p>로그인하면 처음 보는 화면이에요. 위에서부터 <b>최종 점수가 높은 순</b>이고, 끝까지 내리면 다음 작품들이 계속 이어져요.</p>
   <ul>
-    <li><b>취향 유사도</b> — 내가 좋아한 작품들과 줄거리·장르·태그·작가가 얼마나 닮았는지.</li>
-    <li><b>보정</b> — 무료로 볼 수 있는 양이 많을수록, 길수록, 평점이 높을수록 조금 앞으로.</li>
-    <li><b>유료 위주</b>(무료 3화 이하) 작품은 점수와 상관없이 뒤로 보내요.</li>
-    <li>위쪽이 비슷한 작품으로만 채워지지 않도록 다양하게 섞어요.</li>
+    <li><b>안 본 것만 / 본 것 포함 / 본 것만</b> — 기본은 아직 평가하지 않은 작품만. 다시 볼 작품을 찾을 땐 '본 것 포함'.</li>
+    <li><b>점수 공식 조정</b> — 무료 회차·총 회차·네이버 평점을 얼마나 반영할지, 유료 위주 작품을 뒤로 보낼지, 얼마나 다양하게 섞을지 직접 바꿔 볼 수 있어요.</li>
+    <li><b>소식 · 빠른 평가 바로가기</b> — 최근 무료가 늘어난 작품 수가 보이고, 누르면 소식 화면으로 가요.</li>
   </ul>
-  <p>카드의 <b>×</b> 는 '관심 없음' — 추천에서 빠지고 비슷한 작품도 조금 내려가요. <b>안 본 것만 / 본 것 포함 / 본 것만</b> 탭으로 범위를 바꿀 수 있고, '점수 공식 조정'에서 보정 세기를 직접 바꿔 볼 수 있어요.</p>
+  <p class="guide__formula">최종 점수 = 취향 유사도 × 보정(무료 회차 · 총 회차 · 네이버 평점)</p>
+  <p class="muted small">취향 유사도는 내가 좋아한 작품들과 줄거리·장르·태그·작가가 얼마나 닮았는지예요. 위쪽이 비슷한 작품으로만 채워지지 않도록 조금씩 섞고, 무료 3화 이하인 '유료 위주' 작품은 점수와 상관없이 뒤로 보내요.</p>
 </section>
 
-<section class="panel guide" id="match">
-  <h2>추천도 (0~100)</h2>
-  <p>작품 화면과 카드에 보이는 숫자예요. 최종 점수가 <b>전체 작품 중 위에서 몇 %인지</b>를 뒤집은 값이라, 50 이면 딱 중간, 100 이면 1등이에요.</p>
+<section class="panel guide" id="card">
+  <h2>작품 카드 읽는 법</h2>
+  <div class="guide__split">
+    {{ shot('card', '추천 작품 카드 한 장', marks=[(1, 3, 6), (2, 33.5, 29), (3, 33.5, 45), (4, 33.5, 60), (5, 97, 6), (6, 3.5, 74), (7, 3.5, 86.5), (8, 97, 74)], narrow=True) }}
+    <ol class="guide__legend">
+      <li><b>순위</b> — 추천 화면에서 몇 번째인지.</li>
+      <li><b>추천도 · 무료 · 총 회차 · 네이버 평점</b> — 추천도(0~100)는 색으로 한눈에 (<a href="#detail">아래</a> 참고). 초록 배지는 무료로 볼 수 있는 회차예요.</li>
+      <li><b>왜 추천됐는지</b> — 가장 닮은, 내가 좋아한 작품과 겹치는 장르·태그·작가.</li>
+      <li><b>점수 계산</b> — 취향 유사도 × 보정 = 최종 점수.</li>
+      <li><b>× 관심 없음</b> — 추천에서 빼요. 비슷한 작품도 조금 내려가요. 바로 '되돌리기'가 떠요.</li>
+      <li><b>별점</b> — 반 개 단위, 0~10점. 누르는 즉시 저장되고 추천도가 바로 다시 계산돼요. 같은 별을 다시 누르면 지워져요.</li>
+      <li><b>상태</b> — {% for k, label in STATUSES.items() %}{{ label }}{{ ' · ' if not loop.last }}{% endfor %}. 별점과 따로 남길 수 있어요.</li>
+      <li><b>세부 평가 · 메모</b> — {% for k, label in ASPECTS.items() %}{{ label }}{{ ' · ' if not loop.last }}{% endfor %} 점수, 본 화수, 메모.</li>
+    </ol>
+  </div>
+  <p class="muted small">취향 반영: 10점일수록 강하게 끌어당기고, 4점은 중립, 그보다 낮으면 비슷한 작품을 조금 밀어내요. 오래된 평가는 조금씩 약해져요(그래도 절반 아래로는 안 내려가요).</p>
+</section>
+
+<section class="panel guide" id="detail">
+  <h2>작품 화면 · 추천도</h2>
+  {{ shot('detail', '작품 화면: 표지, 줄거리, 추천도 상자, 평가 위젯, 네이버 시리즈 버튼', marks=[(1, 23, 53), (2, 99, 53), (3, 23, 75), (4, 21.5, 91)]) }}
+  <ol class="guide__legend guide__legend--row">
+    <li><b>추천도</b> — 최종 점수가 <b>전체 작품 중 위에서 몇 %인지</b>를 뒤집은 값이에요. 50 이면 딱 중간, 100 이면 1등.</li>
+    <li><b>구간 이름</b> — 색과 함께 아래 네 구간으로 나눠요.</li>
+    <li><b>평가 위젯</b> — 카드와 같아요. 여기서 별점을 바꾸면 위 추천도가 그 자리에서 바뀌어요.</li>
+    <li><b>네이버 시리즈에서 보기</b> — 휴대폰에선 앱/모바일 페이지로 열려요.</li>
+  </ol>
   <div class="guide__tones">
     {%- for tone, label, range in tones %}
     <p><span class="badge badge--match-{{ tone }}">{{ range }}</span> {{ label }}</p>
     {%- endfor %}
   </div>
-  <p>평가한 작품의 추천도는 <b>내 평가까지 반영</b>해서 별점을 올리면 오르고 내리면 내려가요. 평가하면 그 자리에서 바로 다시 계산돼요. 작품 화면에는 평가하기 전 예측값('평가 전 예측')도 함께 보여요.</p>
+  <p>평가한 작품은 <b>내 평가까지 반영</b>한 추천도예요 — 별점을 올리면 오르고 내리면 내려가요. 상자 아래에 평가하기 전의 예측값('평가 전 예측')도 함께 보여 줘서, 추천기가 미리 맞혔는지 볼 수 있어요. 아래쪽에는 이 작품과 비슷한 작품들이 나와요.</p>
 </section>
 
-<section class="panel guide" id="news">
-  <h2>소식</h2>
-  <p>작품 정보는 {{ settings.crawl_interval_hours | int }}시간마다 다시 수집해요. 그 사이 바뀐 것 중 반가운 소식만 최근 {{ news_days }}일치를 모아 보여 줘요.</p>
+<section class="panel guide" id="quick">
+  <h2>빠른 평가</h2>
+  <div class="guide__split">
+    {{ shot('quick', '빠른 평가 카드: 별점과 저장하고 다음, 보류 넘기기 버튼', marks=[(1, 3, 60), (2, 3, 70), (3, 3, 82)], narrow=True) }}
+    <div>
+      <p>한 장씩 넘기며 평가 수를 빠르게 늘리는 화면이에요. 할 수 있는 건 둘뿐이에요.</p>
+      <ol class="guide__legend">
+        <li><b>별점</b>을 고르고</li>
+        <li><b>저장하고 다음</b> — 상태는 '봤음'으로 저장돼요.</li>
+        <li><b>보류 · 넘기기</b> — 안 봤거나 애매할 때. 취향에 반영하지 않고 {{ skip_days }}일 동안 다시 묻지 않아요.</li>
+      </ol>
+      <p>많이 본 작품, 내 취향과 가까운 작품부터 물어봐요. 한 장르로만 좁아지지 않도록 <b>{{ explore_every }}장마다 한 번은 내가 덜 평가한 장르의 작품</b>이 섞여 나와요 ({{ ui.badge('다른 취향도 섞어 볼게요', 'promo', icon_name='sparkle') }} 표시).</p>
+      <p class="muted small">실수로 넘겼다면 위쪽의 '되돌리기'를 누르세요. 상태·본 화수는 작품 화면에서 남겨요.</p>
+    </div>
+  </div>
+</section>
+
+<section class="panel guide" id="rate">
+  <h2>찾아서 평가</h2>
+  {{ shot('rate', '찾아서 평가 화면: 검색칸과 장르·정렬·무료·연재 필터, 상태별 탭, 작품 카드') }}
   <ul>
-    <li>무료 회차가 늘었거나 전부 무료가 됨, 새 회차, 완결, 기간 한정 무료.</li>
-    <li>내가 보는 중·찜한 작품 소식이 위로, 관심 없음·낮은 점수를 준 작품 소식은 빠져요.</li>
-    <li>본 화수를 남긴 작품은 '이어 보기'에 남은 회차가 보여요.</li>
+    <li>제목·작가 검색칸에도 <a href="#search">자동완성</a>이 떠요. Enter 를 누르면 고른 필터와 함께 목록으로 보여 줘요.</li>
+    <li><b>장르 · 정렬 · 무료 회차 · 연재/완결</b>로 거르고, 아래 탭으로 <b>내 평가 상태</b>별로 볼 수 있어요.</li>
+    <li>찾는 작품이 없으면 아직 수집하지 않은 작품이에요. '네이버 시리즈 링크로 가져오기'에 작품 주소를 붙여 넣으면 바로 추가돼요.</li>
+    <li><b>시리즈 내 서재에서 가져오기</b> — 네이버 시리즈에서 본 작품을 한 번에 가져올 수 있어요 (데모 계정은 막혀 있어요).</li>
   </ul>
 </section>
 
 <section class="panel guide" id="search">
   <h2>검색</h2>
-  <p>위쪽 검색창에 제목이나 작가를 치면 바로 작품 목록이 떠요. 누르면 작품 화면으로 가고, Enter 는 전체 결과를 보여 줘요.</p>
+  <div class="guide__split">
+    {{ shot('search', '위 메뉴 검색창에 회귀를 입력하자 작품 목록이 뜬 모습', marks=[(1, 3, 13), (2, 97.5, 15), (3, 3, 96)], narrow=True) }}
+    <div>
+      <p>모든 화면 위쪽에 검색창이 있어요. 제목이나 작가를 치는 동안 작품이 바로 떠요.</p>
+      <ol class="guide__legend">
+        <li><b>맞는 부분</b>이 초록색으로 표시돼요. 띄어쓰기는 무시해요 — '나혼자' 로도 '나 혼자만 레벨업' 을 찾아요.</li>
+        <li>로그인했다면 <b>추천도</b>도 같이 보여요. 누르면 작품 화면으로 바로 가요.</li>
+        <li><b>전체 보기</b> (또는 Enter) — 검색 결과 전체 목록.</li>
+      </ol>
+      <p>어느 화면에서든 <kbd>/</kbd> 를 누르면 검색창으로 가요. <kbd>↓</kbd> <kbd>↑</kbd> 로 고르고 <kbd>Enter</kbd> 로 열고, <kbd>Esc</kbd> 로 닫아요.</p>
+    </div>
+  </div>
+</section>
+
+<section class="panel guide" id="news">
+  <h2>소식</h2>
+  {{ shot('news', '소식 화면: 이어 보기 카드와 무료가 늘어난 작품 목록') }}
+  <p>작품 정보는 {{ settings.crawl_interval_hours | int }}시간마다 다시 수집해요. 그 사이 바뀐 것 중 반가운 소식만 최근 {{ news_days }}일치를 모아 보여 줘요.</p>
   <ul>
-    <li>어느 화면에서든 <kbd>/</kbd> 를 누르면 검색창으로 가요. <kbd>↓</kbd> <kbd>↑</kbd> 로 고르고 <kbd>Esc</kbd> 로 닫아요.</li>
-    <li>띄어쓰기는 무시해요 — '나혼자' 로도 '나 혼자만 레벨업' 을 찾아요.</li>
-    <li>없는 작품은 아직 수집하지 않은 작품이에요. 평가 화면의 '네이버 시리즈 링크로 가져오기'로 추가할 수 있어요.</li>
+    <li><b>이어 보기</b> — '보는 중'인 작품. 본 화수를 남기면 남은 회차와 무료로 더 볼 수 있는 회차를 알려 줘요. '+1화 봤어요'로 바로 올려요.</li>
+    <li><b>바뀐 작품</b> — 무료 회차가 늘었거나 전부 무료가 됨, 새 회차, 완결, 기간 한정 무료(남은 기간 표시).</li>
+    <li>내가 보는 중·보고 싶음·봤음인 작품 소식이 위로, 관심 없음·하차·낮은 점수를 준 작품 소식은 빠져요.</li>
   </ul>
 </section>
 
+<section class="panel guide" id="taste">
+  <h2>내 취향</h2>
+  {{ shot('taste', '내 취향 화면: 평가 수, 평균 별점, 별점 분포 그래프, 추천기가 보는 내 취향 막대') }}
+  <p>내 메뉴 → <b>내 평가 기록</b> → <b>취향</b> 탭. 별점 분포와, 추천기가 내 평가에서 읽어 낸 <b>무게가 큰 장르·태그·작가</b>를 보여 줘요. 추천이 이상하다 싶을 때 여기서 이유를 찾을 수 있어요.</p>
+</section>
+
 <section class="panel guide" id="more">
-  <h2>그 밖에</h2>
-  <ul>
-    <li><b>화면 테마</b> — 오른쪽 위 내 메뉴에서 자동(기기 설정) · 라이트 · 다크를 골라요. 기기마다 따로 기억해요.</li>
-    <li><b>내 평가 기록 · 내 취향</b> — 내가 남긴 평가 목록과 점수 분포, 좋아하는 장르·작가·태그 요약.</li>
-    <li><b>내보내기 · 가져오기</b> — <a href="/settings">설정</a>에서 내 평가를 파일로 받거나 되살릴 수 있어요.</li>
-    <li><b>휴대폰</b> — 브라우저의 '홈 화면에 추가'로 앱처럼 쓸 수 있어요.</li>
-  </ul>
+  <h2>설정 · 테마 · 휴대폰</h2>
+  <div class="guide__split">
+    {{ shot('usermenu', '오른쪽 위 내 메뉴: 내 평가 기록, 설정, 사용 가이드, 테마 고르기, 로그아웃', narrow=True) }}
+    <ul>
+      <li><b>화면 테마</b> — 오른쪽 위 내 메뉴에서 <b>자동(기기 설정) · 라이트 · 다크</b>. 기기마다 따로 기억해요. 이 가이드의 그림도 고른 테마에 맞춰 바뀌어요.</li>
+      <li><b>설정</b> — 비밀번호 바꾸기, 내 평가를 파일로 <b>내보내기 · 가져오기</b>.</li>
+      <li><b>휴대폰</b> — 아래쪽 탭바로 추천 · 평가 · 소식 · 내 정보를 오가요. 브라우저의 '홈 화면에 추가'로 앱처럼 쓸 수 있어요.</li>
+    </ul>
+  </div>
+  {{ shot('mobile', '휴대폰 화면: 위에는 로고와 검색창, 아래에는 추천·평가·소식·내 정보 탭바', narrow=True) }}
 </section>
 {% endblock %}

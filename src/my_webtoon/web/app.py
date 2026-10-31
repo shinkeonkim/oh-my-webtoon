@@ -1178,7 +1178,9 @@ def free_tone(comic) -> str:
 def static_version(static_dir: Path) -> str:
     """정적 파일 내용 해시 앞 8자리. 파일이 바뀌면 URL(?v=)이 바뀌어 브라우저 캐시를 피한다."""
     digest = hashlib.sha256()
-    for path in sorted(static_dir.iterdir()):
+    for path in sorted(
+        p for p in static_dir.rglob("*") if p.is_file()
+    ):  # 하위 폴더(guide/ 그림)까지
         digest.update(path.read_bytes())
     return digest.hexdigest()[:8]
 
