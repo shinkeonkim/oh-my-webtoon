@@ -51,6 +51,8 @@ def fetch_one(
     page = client.get(f"/comic/detail.series?productNo={product_no}")
     if parser.is_login_page(page.url, page.text):
         raise parser.LoginRequired(product_no)
+    if parser.is_stop_sale_page(page.url):
+        raise parser.StopSale(product_no)
     if page.status != 200:
         raise RuntimeError(f"HTTP {page.status}")
     data = parser.parse_detail(product_no, page.text)
@@ -135,6 +137,12 @@ def run_once(
                     data, links = fetch_one(client, product_no, excluded_genres)
                 except parser.LoginRequired:
                     db.mark_crawled(conn, product_no, "skipped", "로그인 필요(19금)")
+                    result.skipped += 1
+                except parser.StopSale:
+                    # 실패로 두면 crawled_at 이 그대로라 매번 '가장 오래된 갱신 대상'으로 다시 뽑힌다.
+                    # 저장된 정보·평가는 두고, 다시 판매될 수 있으니 갱신 주기마다 한 번씩만 확인한다.
+                    db.mark_crawled(conn, product_no, "skipped", "판매 중지")
+                    db.touch_crawled(conn, product_no)
                     result.skipped += 1
                 except parser.ExcludedGenre as exc:
                     # 지웠다가 플래그를 풀면 다시 가져올 수 있게 이유를 정해진 모양으로 남긴다

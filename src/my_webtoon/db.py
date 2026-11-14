@@ -487,6 +487,11 @@ def mark_crawled(
     )
 
 
+def touch_crawled(conn: sqlite3.Connection, product_no: int) -> None:
+    """저장된 작품의 수집 시각만 지금으로 — 내용은 못 가져왔지만 확인은 한 경우."""
+    conn.execute("UPDATE comics SET crawled_at = ? WHERE product_no = ?", (now_iso(), product_no))
+
+
 def replace_promos(conn: sqlite3.Connection, promos: dict[int, str]) -> None:
     """무료관 이벤트는 매번 통째로 바뀌므로 지우고 다시 넣는다.
     새로 이벤트에 걸린 작품은 comic_changes 에 'promo' 로 남긴다 ('N일 남음'은 매일 바뀌니 걸림/안 걸림만 본다)."""

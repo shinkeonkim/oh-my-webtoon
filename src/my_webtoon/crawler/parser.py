@@ -106,12 +106,20 @@ class LoginRequired(Exception):
     """19금 등 로그인이 필요한 작품. 크롤러는 이 작품을 건너뛴다."""
 
 
+class StopSale(Exception):
+    """판매 중지된 작품. 상세 페이지 대신 /error/stopSale.series 로 리다이렉트된다."""
+
+
 class ExcludedGenre(Exception):
     """설정(EXCLUDED_GENRES)으로 빼 둔 장르. 저장하지 않고, 그 페이지의 링크도 따라가지 않는다."""
 
 
 def is_login_page(final_url: str, html: str) -> bool:
     return "nid.naver.com" in final_url or "nidlogin" in html[:5000]
+
+
+def is_stop_sale_page(final_url: str) -> bool:
+    return "/error/stopSale" in final_url
 
 
 def parse_detail(product_no: int, html: str) -> dict:
